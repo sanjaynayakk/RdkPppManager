@@ -43,6 +43,7 @@
 #include "pppmgr_ssp_global.h"
 
 #define  DML_IF_NAME_LENGTH                    512
+#define  PPP_CREDS_MAX_LEN                     65
 
 typedef  ANSC_HANDLE (*PFN_DM_CREATE) (VOID);
 

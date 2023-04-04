@@ -112,8 +112,8 @@ typedef  struct _DML_PPP_IF_CFG
     ULONG                           AutoDisconnectTime;
     ULONG                           IdleDisconnectTime;
     ULONG                           WarnDisconnectDelay;
-    char                            Username[65];
-    char                            Password[65];
+    char                            Username[PPP_CREDS_MAX_LEN];
+    char                            Password[PPP_CREDS_MAX_LEN];
     USHORT                          MaxMRUSize;
     PPP_DML_CONN_TRIGGER       ConnectionTrigger;
     /*

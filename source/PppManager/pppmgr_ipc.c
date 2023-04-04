@@ -165,7 +165,6 @@ static void PppMgr_GenerateDuidFile (char *wanName)
     if(fd == NULL)
     {
         CcspTraceError(("%s %d:Failed to open mac address table\n", __FUNCTION__, __LINE__));
-        fclose(fd);
         return;
     }
 

@@ -39,6 +39,7 @@
 #include "pppmgr_dml_ppp_apis.h"
 #include "ccsp_psm_helper.h"
 #include <syscfg/syscfg.h>
+#include <platform_hal.h>
 
 #define PPP_IF_SERVICE_NAME "atm0.0.0.38"
 #define PPP_IF_NAME         "pppoa0"
@@ -1000,6 +1001,14 @@ Interface_GetParamStringValue
 
     if( AnscEqualString(ParamName, "Username", TRUE))
     {
+        if ( strcmp(pEntry->Cfg.Username, "") == 0 )
+        {
+            if( RETURN_ERR == platform_hal_GetPppUserName(pEntry->Cfg.Username, sizeof(pEntry->Cfg.Username)) )
+            {
+                CcspTraceError(("%s %d - Failed to read ppp username from persistent storage\n", __FUNCTION__, __LINE__));
+            }
+        }
+
 		 /* collect value */
         AnscCopyString(pValue, pEntry->Cfg.Username);
 
@@ -1008,6 +1017,13 @@ Interface_GetParamStringValue
 
     if( AnscEqualString(ParamName, "Password", TRUE))
     {
+        if ( strcmp(pEntry->Cfg.Password, "") == 0 )
+        {
+            if( RETURN_ERR == platform_hal_GetPppPassword(pEntry->Cfg.Password, sizeof(pEntry->Cfg.Password)) )
+            {
+                CcspTraceError(("%s %d - Failed to read ppp password from persistent storage\n", __FUNCTION__, __LINE__));
+            }
+	}
 		/* collect value */
         AnscCopyString(pValue, "");
 
@@ -1092,6 +1108,25 @@ Interface_SetParamBoolValue
             }
 
             pEntry->Info.pppPid = 0;
+
+            if ( (strcmp(pEntry->Cfg.Username,"") == 0) && (strcmp(pEntry->Cfg.Password,"") == 0) )
+            {
+                int ret = platform_hal_GetPppUserName(pEntry->Cfg.Username, sizeof(pEntry->Cfg.Username));
+                if( ret != 0 )
+               {
+                    CcspTraceError(("%s %d - Failed to read ppp username from persistent storage %d\n",
+                    __FUNCTION__, __LINE__, ret ));
+                    return FALSE;
+                }
+
+                ret = platform_hal_GetPppPassword(pEntry->Cfg.Password, sizeof(pEntry->Cfg.Password));
+                if( ret != 0 )
+                {
+                    CcspTraceError(("%s %d - Failed to read ppp pasword from persistent storage %d\n",
+                    __FUNCTION__, __LINE__, ret ));
+                    return FALSE;
+                }
+            }
 
             if((strcmp(pEntry->Info.Name,"") != 0) && (strcmp(pEntry->Info.InterfaceServiceName,"") != 0) &&
                     (strcmp(pEntry->Cfg.Username,"") != 0) && (strcmp(pEntry->Cfg.Password,"") != 0) &&
@@ -1510,18 +1545,30 @@ Interface_SetParamStringValue
     {
         instancenum = pEntry->Cfg.InstanceNumber;
 
-        AnscCopyString(pEntry->Cfg.Username, pString);
-
-        retStatus = TRUE;
+        if(RETURN_ERR == platform_hal_SetPppUserName(pString, PPP_CREDS_MAX_LEN))
+        {
+            CcspTraceError(("platform_hal_SetPppUserName failed\n"));
+            retStatus = FALSE;
+        } else
+        {
+            AnscCopyString(pEntry->Cfg.Username, pString);
+            retStatus = TRUE;
+        }
     }
 
     if( AnscEqualString(ParamName, "Password", TRUE))
     {
         instancenum = pEntry->Cfg.InstanceNumber;
 
-        AnscCopyString(pEntry->Cfg.Password, pString);
-
-        retStatus = TRUE;
+        if(RETURN_ERR == platform_hal_SetPppPassword(pString, PPP_CREDS_MAX_LEN))
+        {
+            CcspTraceError(("platform_hal_SetPppPassword failed\n"));
+            retStatus = FALSE;
+        } else
+        {
+            AnscCopyString(pEntry->Cfg.Password, pString);
+            retStatus = TRUE;
+        }
     }
 
     pthread_mutex_unlock(&pEntry->mDataMutex);
