@@ -55,6 +55,16 @@
 #define WAN_COMPONENT_NAME    "eRT.com.cisco.spvtg.ccsp.wanmanager"
 #define WAN_DBUS_PATH    "/com/cisco/spvtg/ccsp/wanmanager"
 /* PPP wan manager params */
+#if defined(WAN_MANAGER_UNIFICATION_ENABLED)
+#define PPP_LCP_STATUS_PARAM_NAME    "Device.X_RDK_WanManager.Interface.%d.VirtualInterface.1.PPP.LCPStatus"
+#define PPP_LINK_STATUS_PARAM_NAME    "Device.X_RDK_WanManager.Interface.%d.VirtualInterface.1.PPP.Status"
+#define PPP_IPCP_STATUS_PARAM_NAME    "Device.X_RDK_WanManager.Interface.%d.VirtualInterface.1.PPP.IPCPStatus"
+#define PPP_IPV6CP_STATUS_PARAM_NAME    "Device.X_RDK_WanManager.Interface.%d.VirtualInterface.1.PPP.IPv6CPStatus"
+/* wan manager params */
+#define WAN_NOE_PARAM_NAME    "Device.X_RDK_WanManager.InterfaceNumberOfEntries"
+#define WAN_PHY_PATH_PARAM_NAME    "Device.X_RDK_WanManager.Interface.%d.BaseInterface"
+#define WAN_IFACE_NAME             "Device.X_RDK_WanManager.Interface.%d.VirtualInterface.1.Name"
+#else
 #define PPP_LCP_STATUS_PARAM_NAME    "Device.X_RDK_WanManager.CPEInterface.%d.PPP.LCPStatus"
 #define PPP_LINK_STATUS_PARAM_NAME    "Device.X_RDK_WanManager.CPEInterface.%d.PPP.LinkStatus"
 #define PPP_IPCP_STATUS_PARAM_NAME    "Device.X_RDK_WanManager.CPEInterface.%d.PPP.IPCPStatus"
@@ -63,6 +73,7 @@
 #define WAN_NOE_PARAM_NAME    "Device.X_RDK_WanManager.CPEInterfaceNumberOfEntries"
 #define WAN_PHY_PATH_PARAM_NAME    "Device.X_RDK_WanManager.CPEInterface.%d.Phy.Path"
 #define WAN_IFACE_NAME             "Device.X_RDK_WanManager.CPEInterface.%d.Wan.Name"
+#endif /* WAN_MANAGER_UNIFICATION_ENABLED */
 
 #define DATAMODEL_PARAM_LENGTH    256
 
