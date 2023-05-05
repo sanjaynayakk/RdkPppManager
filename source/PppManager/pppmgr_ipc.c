@@ -62,10 +62,13 @@
 #define PPP_EXIT_HANGUP              16
 #define PPP_EXIT_AUTH_TOPEER_FAILED  19
 
+#define PPP_EVENT_QUEUE_NAME "/pppmgr_queue"
+#define MAX_QUEUE_LENGTH           100
+
 /* ---- private Functions ------------------------------------ */
 static ANSC_STATUS PppMgr_createIpcSockFd( int32_t  *sockFd, uint32_t sockMode);
 static ANSC_STATUS  PppMgr_bindIpcSocket( int32_t sockFd);
-static void* PppMgr_IpcServerThread( void *arg );
+static void* PppMgr_EventHandlerThread( void *arg );
 static ANSC_STATUS PppMgr_IpcServerInit();
 static PSINGLE_LINK_ENTRY PppMgr_DmlGetLinkEntry(pid_t pid, char *interface);
 static ANSC_STATUS PppMgr_DmlSetIp4Param (char * ipbuff, char * ipCharArr);
@@ -73,7 +76,8 @@ static ANSC_STATUS PppMgr_ProcessStateChangedMsg(PDML_PPP_IF_FULL pNewEntry, ipc
 static ANSC_STATUS PppMgr_receiveIpcSocket(int32_t sockFd, char *msg, uint32_t *msgLen);
 static ANSC_STATUS PppMgr_ProcessIpcpParams(PDML_PPP_IF_FULL pNewEntry, ipc_ppp_event_msg_t pppEventMsg);
 static ANSC_STATUS PppMgr_ProcessIpv6cpParams(PDML_PPP_IF_FULL pNewEntry, ipc_ppp_event_msg_t pppEventMsg);
-static ANSC_STATUS PppMgr_ProcessIpcMsg(ipc_msg_payload_t ipcMsg);
+static ANSC_STATUS PppMgr_ProcessPppState(ipc_msg_payload_t ipcMsg);
+static int PppMgr_ProcessPppEvent(PPPEventQData * eventMsg);
 
 /* ------------------extern variables -------------------------*/
 extern PBACKEND_MANAGER_OBJECT               g_pBEManager;
@@ -106,10 +110,62 @@ static char *pppStateNames[] =
 
 };
 
-struct UpdateWanManager_args{
-    INT WANInstance;
-    char LinkStatus[6];
-};
+DML_PPP_IF_FULL  * PppMgr_GetIfaceData_locked (UINT pppIfaceInstance)
+{
+    if (pppIfaceInstance <= 0 || DmlGetTotalNoOfPPPInterfaces(NULL) < pppIfaceInstance)
+    {
+        return NULL;
+    }
+
+    UINT iface_index = pppIfaceInstance - 1;
+
+    PDATAMODEL_PPP             pMyObject               = (PDATAMODEL_PPP      )g_pBEManager->hPPP;
+    PDML_PPP_IF_FULL           pPppTable                  = (PDML_PPP_IF_FULL    )pMyObject->PppTable;
+
+    pthread_mutex_lock(&pPppTable[iface_index].mDataMutex);
+    return &pPppTable[iface_index];
+}
+
+void PppMgr_GetIfaceData_release (DML_PPP_IF_FULL * pPppTable)
+{
+    if (pPppTable != NULL)
+    {
+        pthread_mutex_unlock(&pPppTable->mDataMutex);
+    }
+}
+
+ANSC_STATUS PppMgr_SendDataToQ (PPPEventQData * pEventData)
+{
+    if (pEventData == NULL)
+    {
+        CcspTraceError(("%s %d: invalid args\n"));
+        return ANSC_STATUS_FAILURE;
+    }
+
+    CcspTraceInfo(("%s %d: Writing - action:%s WANInstance:%d keyPath=%s val=%s to queue\n", 
+                __FUNCTION__, __LINE__, pEventData->action == PPPMGR_BUS_SET?"PPPMGR_BUS_SET":"PPPMGR_EXEC_PPP_CLIENT", pEventData->WANInstance, pEventData->keyPath, pEventData->val));
+
+    mqd_t mq;
+
+    mq = mq_open(PPP_EVENT_QUEUE_NAME, O_WRONLY);
+    if (mq == -1)
+    {
+        CcspTraceError(("%s %d: mq_open failed :%s\n", __FUNCTION__, __LINE__, strerror(errno)));
+        return ANSC_STATUS_FAILURE;
+    }
+
+    if (mq_send(mq, (const char *)pEventData, sizeof(PPPEventQData), 0) != 0 )
+    {   
+        CcspTraceError(("%s %d: mq_send failed :%s\n", __FUNCTION__, __LINE__, strerror(errno)));
+        mq_close(mq);
+        return ANSC_STATUS_FAILURE;
+    }
+
+    CcspTraceInfo(("%s %d: Successfully posted EvenetDate to Q\n", __FUNCTION__, __LINE__));
+
+    mq_close(mq);
+    return ANSC_STATUS_SUCCESS;
+}
 
 /* ---------------------------------------------------------------------------
    This internal API will convert state to string
@@ -317,7 +373,7 @@ static ANSC_STATUS PppMgr_receiveIpcSocket(int32_t sockFd, char *msg, uint32_t *
 #ifdef _USE_NM_MSG_SOCK
 
     void *ipcBuff = NULL;
-    *msgLen = nn_recv (sockFd, &ipcBuff, NN_MSG, 0);
+    *msgLen = nn_recv (sockFd, &ipcBuff, NN_MSG, NN_DONTWAIT);
 
     if(ipcBuff == NULL)
     {
@@ -353,32 +409,6 @@ extern ANSC_STATUS PppMgr_closeIpcSocket(int32_t sockFd)
 #endif
 }
 
-static void* PppMgr_SetErrorStatus_Thread(void *arg)
-{
-    INT iWANInstance = (INT *) arg;
-    char acSetParamName[DATAMODEL_PARAM_LENGTH] = { 0 };
-    char acSetParamValue[DATAMODEL_PARAM_LENGTH] = { 0 };
-
-    pthread_detach(pthread_self());
-
-    if(iWANInstance <= 0)
-    {
-        return ANSC_STATUS_FAILURE;
-    }
-
-    snprintf(acSetParamName, DATAMODEL_PARAM_LENGTH, PPP_IPCP_STATUS_PARAM_NAME, iWANInstance);
-    snprintf(acSetParamValue, DATAMODEL_PARAM_LENGTH, "Down");
-
-    if(DmlWanmanagerSetParamValues(WAN_COMPONENT_NAME, WAN_DBUS_PATH, acSetParamName,
-                acSetParamValue, ccsp_string, TRUE ) == ANSC_STATUS_SUCCESS)
-    {
-        CcspTraceInfo(("Successfully set %s with value %s\n", acSetParamName, acSetParamValue));
-    }
-
-    pthread_exit(NULL);
-    return NULL;
-}
-
 /* --------------------------------------------------------------------
 Function : PppMgr_SetErrorStatus
 
@@ -386,43 +416,23 @@ Decription: This API will set down state to wan manager IPCP status
 -----------------------------------------------------------------------*/
 static ANSC_STATUS PppMgr_SetErrorStatus(INT iWANInstance)
 {
-    pthread_t threadId;
-    INT iErrorCode;
 
-    /* Updating WanManager DM with PPP DML mutex lock creats mutex deadlock with WanManager DM mutex. Moving 
-       DM set to thread to avoid mutex deadlock */ 
-    iErrorCode = pthread_create( &threadId, NULL, &PppMgr_SetErrorStatus_Thread, (void*)iWANInstance );
-    if( 0 != iErrorCode )
+    PPPEventQData eventData = {0};
+
+    eventData.action = PPPMGR_BUS_SET; 
+    eventData.WANInstance = iWANInstance; 
+    eventData.comPath = WAN_COMPONENT_NAME;
+    eventData.busPath = WAN_DBUS_PATH;
+    eventData.keyPath = PPP_IPCP_STATUS_PARAM_NAME;
+    strncpy(eventData.val, DOWN, sizeof(eventData.val) - 1);
+
+    if (PppMgr_SendDataToQ(&eventData) != ANSC_STATUS_SUCCESS)
     {
-        CcspTraceInfo(("%s %d - Failed to start PppMgr_SetErrorStatus_Thread  EC:%d\n", __FUNCTION__, __LINE__, iErrorCode ));
+        CcspTraceError(("%s %d - Failed to send data to Q\n", __FUNCTION__, __LINE__));
         return ANSC_STATUS_FAILURE;
     }
+
     return ANSC_STATUS_SUCCESS;
-}
-
-static void* PppMgr_SetIpv6ErrorStatus_Thread(void *arg)
-{
-    INT iWANInstance = (INT *) arg;
-    char acSetParamName[DATAMODEL_PARAM_LENGTH] = { 0 };
-    char acSetParamValue[DATAMODEL_PARAM_LENGTH] = { 0 };
-
-    pthread_detach(pthread_self());
-
-    if(iWANInstance <= 0)
-    {
-        return ANSC_STATUS_FAILURE;
-    }
-
-    snprintf(acSetParamName, DATAMODEL_PARAM_LENGTH, PPP_IPV6CP_STATUS_PARAM_NAME, iWANInstance);
-    snprintf(acSetParamValue, DATAMODEL_PARAM_LENGTH, "Down");
-
-    if(DmlWanmanagerSetParamValues(WAN_COMPONENT_NAME, WAN_DBUS_PATH, acSetParamName,
-                acSetParamValue, ccsp_string, TRUE ) == ANSC_STATUS_SUCCESS)
-    {
-        CcspTraceInfo(("Successfully set %s with value %s\n", acSetParamName, acSetParamValue));
-    }
-    pthread_exit(NULL);
-    return NULL;
 }
 
 /* --------------------------------------------------------------------
@@ -432,18 +442,21 @@ Decription: This API will set down state to wan manager IPV6CP
 -----------------------------------------------------------------------*/
 static ANSC_STATUS PppMgr_SetIpv6ErrorStatus(INT iWANInstance)
 {
-    pthread_t threadId;
-    INT iErrorCode;
+    PPPEventQData eventData = {0};
 
-    /* Updating WanManager DM with PPP DML mutex lock creats mutex deadlock with WanManager DM mutex. Moving 
-       DM set to thread to avoid mutex deadlock */ 
-    iErrorCode = pthread_create( &threadId, NULL, &PppMgr_SetIpv6ErrorStatus_Thread, (void*)iWANInstance );
+    eventData.action = PPPMGR_BUS_SET; 
+    eventData.WANInstance = iWANInstance; 
+    eventData.comPath = WAN_COMPONENT_NAME;
+    eventData.busPath = WAN_DBUS_PATH;
+    eventData.keyPath = PPP_IPV6CP_STATUS_PARAM_NAME;
+    strncpy(eventData.val, DOWN, sizeof(eventData.val) - 1);
 
-    if( 0 != iErrorCode )
+    if (PppMgr_SendDataToQ(&eventData) != ANSC_STATUS_SUCCESS)
     {
-        CcspTraceInfo(("%s %d - Failed to start PppMgr_SetIpv6ErrorStatus_Thread  EC:%d\n", __FUNCTION__, __LINE__, iErrorCode ));
+        CcspTraceError(("%s %d - Failed to send data to Q\n", __FUNCTION__, __LINE__));
         return ANSC_STATUS_FAILURE;
     }
+
     return ANSC_STATUS_SUCCESS;
 }
 
@@ -464,7 +477,7 @@ extern ANSC_STATUS PppMgr_StartIpcServer()
         return ANSC_STATUS_FAILURE;
     }
 
-    ret = pthread_create( &ipcThreadId, NULL, &PppMgr_IpcServerThread, NULL );
+    ret = pthread_create( &ipcThreadId, NULL, &PppMgr_EventHandlerThread, NULL );
 
     if( 0 != ret )
     {
@@ -564,41 +577,6 @@ static ANSC_STATUS PppMgr_DmlSetVendorParams(char *invendormsg , int *SRU , int 
     regfree(&regexCompiled);
 
     return ANSC_STATUS_SUCCESS;
-}
-
-static void* UpdateWanManagerThread(void *arg )
-{
-    struct UpdateWanManager_args *args = (struct UpdateWanManager_args *) arg;
-    char acSetParamName[DATAMODEL_PARAM_LENGTH] = { 0 };
-    char acSetParamValue[DATAMODEL_PARAM_LENGTH] = { 0 };
-
-    pthread_detach(pthread_self());
-
-    snprintf(acSetParamName, DATAMODEL_PARAM_LENGTH, PPP_LCP_STATUS_PARAM_NAME, args->WANInstance);
-    snprintf(acSetParamValue, DATAMODEL_PARAM_LENGTH, "%s", args->LinkStatus);
-
-    if(DmlWanmanagerSetParamValues(WAN_COMPONENT_NAME, WAN_DBUS_PATH, acSetParamName,
-                acSetParamValue, ccsp_string, TRUE ) != ANSC_STATUS_SUCCESS)
-    {
-        CcspTraceInfo(("Failed set %s with value %s\n", acSetParamName, acSetParamValue));
-        return ANSC_STATUS_FAILURE;
-    }
-    CcspTraceInfo(("Successfully set %s with value %s\n", acSetParamName, acSetParamValue));
-
-    snprintf(acSetParamName, DATAMODEL_PARAM_LENGTH, PPP_LINK_STATUS_PARAM_NAME, args->WANInstance);
-    snprintf(acSetParamValue, DATAMODEL_PARAM_LENGTH, "%s", args->LinkStatus);
-
-    if(DmlWanmanagerSetParamValues(WAN_COMPONENT_NAME, WAN_DBUS_PATH, acSetParamName,
-                acSetParamValue, ccsp_string, TRUE ) != ANSC_STATUS_SUCCESS)
-    {
-        CcspTraceInfo(("Failed set %s with value %s\n", acSetParamName, acSetParamValue));
-        return ANSC_STATUS_FAILURE;
-    }
-    CcspTraceInfo(("Successfully set %s with value %s\n", acSetParamName, acSetParamValue));
-
-    free(args);
-    pthread_exit(NULL);
-    return NULL;
 }
 
 /* --------------------------------------------------------------------
@@ -731,6 +709,14 @@ static ANSC_STATUS PppMgr_ProcessStateChangedMsg(PDML_PPP_IF_FULL pNewEntry, ipc
 
             break;
 
+        case PPP_INTERFACE_AUTH_FAILED:
+            pNewEntry->Info.Status = DML_IF_STATUS_Down;
+            pNewEntry->Info.ConnectionStatus = DML_PPP_CONN_STATUS_AuthenticationFailed;
+            snprintf(WanPppLinkStatus, sizeof(WanPppLinkStatus), "Down");
+            PppMgr_stopPppoe();
+            updatedParam = 1;
+            break;
+
         default:
             pNewEntry->Info.Status = DML_IF_STATUS_Down;
             pNewEntry->Info.ConnectionStatus = DML_PPP_CONN_STATUS_Disconnected;
@@ -747,19 +733,28 @@ static ANSC_STATUS PppMgr_ProcessStateChangedMsg(PDML_PPP_IF_FULL pNewEntry, ipc
     }
     /* Updating WanManager DM with PPP DML mutex lock creats mutex deadlock with WanManager DM mutex. Moving 
        DM set to thread to avoid mutex deadlock */ 
+    PPPEventQData eventData = {0};
 
-    pthread_t threadId;
-    INT iErrorCode;
-    struct UpdateWanManager_args *args = malloc(sizeof(struct UpdateWanManager_args));
-    args->WANInstance = iWANInstance;
-    strncpy(args->LinkStatus, WanPppLinkStatus, strlen(WanPppLinkStatus)+1);
+    eventData.action = PPPMGR_BUS_SET; 
+    eventData.WANInstance = iWANInstance; 
+    eventData.comPath = WAN_COMPONENT_NAME;
+    eventData.busPath = WAN_DBUS_PATH;
+    eventData.keyPath = PPP_LCP_STATUS_PARAM_NAME;
+    strncpy(eventData.val, WanPppLinkStatus, sizeof(eventData.val) - 1);
 
-    iErrorCode = pthread_create( &threadId, NULL, &UpdateWanManagerThread, (void*)args );
-    if( 0 != iErrorCode )
+    if (PppMgr_SendDataToQ(&eventData) != ANSC_STATUS_SUCCESS)
     {
-        CcspTraceInfo(("%s %d - Failed to start UpdateWanManagerThread  EC:%d\n", __FUNCTION__, __LINE__, iErrorCode ));
+        CcspTraceError(("%s %d - Failed to send data to Q\n", __FUNCTION__, __LINE__));
         return ANSC_STATUS_FAILURE;
     }
+
+    eventData.keyPath = PPP_LINK_STATUS_PARAM_NAME;
+    if (PppMgr_SendDataToQ(&eventData) != ANSC_STATUS_SUCCESS)
+    {
+        CcspTraceError(("%s %d - Failed to send data to Q\n", __FUNCTION__, __LINE__));
+        return ANSC_STATUS_FAILURE;
+    }
+
     return ANSC_STATUS_SUCCESS;
 }
 
@@ -950,7 +945,7 @@ static ANSC_STATUS PppMgr_ProcessIpv6cpParams(PDML_PPP_IF_FULL pNewEntry, ipc_pp
         /* set wan ipv6cp status */
         iWANInstance = pNewEntry->Cfg.WanInstanceNumber;
 
-        PppMgr_GenerateDuidFile(pNewEntry->Cfg.Alias);
+        PppMgr_GenerateDuidFile(pNewEntry->Info.Name);
 
         CcspTraceInfo(("%s %d WAN Instance:%d\n", __FUNCTION__, __LINE__, iWANInstance));
 
@@ -974,7 +969,7 @@ static ANSC_STATUS PppMgr_ProcessIpv6cpParams(PDML_PPP_IF_FULL pNewEntry, ipc_pp
     else
     {
         iWANInstance = pNewEntry->Cfg.WanInstanceNumber;
-        PppMgr_RemoveDuidFile(pNewEntry->Cfg.Alias);
+        PppMgr_RemoveDuidFile(pNewEntry->Info.Name);
         PppMgr_SetIpv6ErrorStatus(iWANInstance);    
     }
 
@@ -986,12 +981,9 @@ Function : ProcessIpcMsg
 
 Decription: This API will process the message received from ppp client 
 -----------------------------------------------------------------------*/
-static ANSC_STATUS PppMgr_ProcessIpcMsg(ipc_msg_payload_t ipcMsg)
+static ANSC_STATUS PppMgr_ProcessPppState(ipc_msg_payload_t ipcMsg)
 {
-    PSINGLE_LINK_ENTRY         pSLinkEntry             = NULL;
-    PDATAMODEL_PPP             pMyObject               = (PDATAMODEL_PPP      )g_pBEManager->hPPP;
-    PPPP_IF_LINK_OBJECT        pLinkContext2           = (PPPP_IF_LINK_OBJECT)NULL;
-    PDML_PPP_IF_FULL           pEntry               = (PDML_PPP_IF_FULL    )NULL;
+
     ANSC_STATUS retStatus = ANSC_STATUS_SUCCESS;
     uint32_t getAttempt = 0;
 
@@ -999,45 +991,37 @@ static ANSC_STATUS PppMgr_ProcessIpcMsg(ipc_msg_payload_t ipcMsg)
     {
         return ANSC_STATUS_FAILURE;
     }
-    // we should try atleast six attempts as pppmanager may not update pppd pid immediately
-    do
+
+    CcspTraceInfo(("%s %d: PPP State change message from interface %s from pid = %d\n", __FUNCTION__, __LINE__, ipcMsg.data.pppEventMsg.interface, ipcMsg.data.pppEventMsg.pid));
+
+
+    // TODO: pid matching needed
+
+    PDML_PPP_IF_FULL pEntry=NULL; 
+    int totalNoOfPppIface = DmlGetTotalNoOfPPPInterfaces(NULL);
+
+    for (int i =1; i <= totalNoOfPppIface; i++)
     {
-        if(getAttempt)
+        pEntry = PppMgr_GetIfaceData_locked(i);
+        if (pEntry != NULL)
         {
-            sleep(1);
+            if (pEntry->Info.pppPid == ipcMsg.data.pppEventMsg.pid)
+            {
+                break;
+            }
+            PppMgr_GetIfaceData_release(pEntry);
+            pEntry = NULL;
         }
-        pSLinkEntry = PppMgr_DmlGetLinkEntry(ipcMsg.data.pppEventMsg.pid, ipcMsg.data.pppEventMsg.interface);
-    
-        getAttempt++;
-
-    }while(pSLinkEntry == NULL && getAttempt < GET_PPPID_ATTEMPT);
-
-    if(pSLinkEntry == NULL)
-    {
-        CcspTraceInfo(("[%s-%d] - instance number not found \n", __FUNCTION__, __LINE__));
-
-        return ANSC_STATUS_FAILURE;
     }
-
-    pLinkContext2 = ACCESS_PPP_IF_LINK_OBJECT(pSLinkEntry);
-
-    if(pLinkContext2 == NULL)
-    {
-        CcspTraceInfo(("[%s-%d] - cannot find  pLinkContext2\n  ", __FUNCTION__, __LINE__));
-
-        return ANSC_STATUS_FAILURE;
-    }
-
-    pEntry = (PDML_PPP_IF_FULL)pLinkContext2->hContext;
 
     if(pEntry == NULL)
     {
-        CcspTraceInfo(("[%s-%d] - cannot find pEntry \n", __FUNCTION__, __LINE__));
+        CcspTraceInfo(("[%s-%d] - cannot find PPP Interface instance \n", __FUNCTION__, __LINE__));
 
         return ANSC_STATUS_FAILURE;
     }
 
-    pthread_mutex_lock(&pEntry->mDataMutex);
+    CcspTraceInfo(("%s %d: handling incoming msg for PPP interface :%s\n", __FUNCTION__, __LINE__, pEntry->Info.Name));
 
     switch(ipcMsg.data.pppEventMsg.pppState)
     {
@@ -1097,17 +1081,77 @@ static ANSC_STATUS PppMgr_ProcessIpcMsg(ipc_msg_payload_t ipcMsg)
             
             break;
     } 
-    pthread_mutex_unlock(&pEntry->mDataMutex);
+    PppMgr_GetIfaceData_release(pEntry);
 
     return retStatus;
 }
 
+static int PppMgr_ProcessPppEvent(PPPEventQData * pEventData) 
+{
+    if (pEventData == NULL || pEventData->WANInstance <= 0 || pEventData->val == NULL)
+    {
+        CcspTraceError(("%s %d: invalid args\n", __FUNCTION__, __LINE__));
+        return ANSC_STATUS_FAILURE;
+    }
+
+    CcspTraceInfo(("%s %d: Reading from Queue - action:%s WANInstance:%d keyPath=%s val=%s\n",
+                __FUNCTION__, __LINE__, pEventData->action == PPPMGR_BUS_SET?"PPPMGR_BUS_SET":"PPPMGR_EXEC_PPP_CLIENT", pEventData->WANInstance, pEventData->keyPath, pEventData->val));
+
+
+    if (pEventData->action == PPPMGR_BUS_SET && pEventData->keyPath && pEventData->comPath && pEventData->busPath)
+    {
+        char key[DATAMODEL_PARAM_LENGTH] = {0};
+        snprintf(key, sizeof(key) - 1, pEventData->keyPath, pEventData->WANInstance);
+
+        if(DmlWanmanagerSetParamValues(pEventData->comPath, pEventData->busPath, key,
+                    pEventData->val, ccsp_string, TRUE ) == ANSC_STATUS_SUCCESS)
+        {
+            CcspTraceInfo(("Successfully set %s with value %s\n", key, pEventData->val));
+            return ANSC_STATUS_SUCCESS;
+        }
+
+    }
+    else if (pEventData->action == PPPMGR_EXEC_PPP_CLIENT)
+    {
+        FILE *pf;
+        char *pCommand = pEventData->val;
+        int getAttempts = 0;
+        unsigned int pppClientPid = 0;
+
+        CcspTraceInfo(("%s %d: Starting ppp client for instance %d\n", __FUNCTION__, __LINE__, pEventData->WANInstance));
+
+        pf = popen(pCommand, "r");
+        if(!pf)
+        {
+            CcspTraceError(("Could not open pipe for output.\n"));
+            return ANSC_STATUS_FAILURE;
+        }
+
+        pclose(pf);
+
+        PDML_PPP_IF_FULL  pEntry = NULL;
+        pppClientPid = PppMgr_getPppPid(NULL);
+
+        pEntry = PppMgr_GetIfaceData_locked (pEventData->WANInstance);
+        if (pEntry != NULL)
+        {
+            pEntry->Info.pppPid = pppClientPid;
+            CcspTraceInfo(("%s %d: iface:%s pid for instance %d is %d\n", __FUNCTION__, __LINE__, pEntry->Info.Name, pEventData->WANInstance, pEntry->Info.pppPid));
+            PppMgr_GetIfaceData_release(pEntry);
+        }
+
+        return ANSC_STATUS_SUCCESS;
+
+    }
+    return ANSC_STATUS_FAILURE;
+}
+
 /* --------------------------------------------------------------------
-Function : PppMgr_IpcServerThread
+Function : PppMgr_EventHandlerThread
 
 Decription: IPC thread function
 -----------------------------------------------------------------------*/
-static void* PppMgr_IpcServerThread( void *arg )
+static void* PppMgr_EventHandlerThread( void *arg )
 {
 
     //detach thread from caller stack
@@ -1118,23 +1162,55 @@ static void* PppMgr_IpcServerThread( void *arg )
 
     int bytesReceived = 0;
     ipc_msg_payload_t sockMsg;
-    uint32_t msgSize = 0;; 
+    int msgSize = 0;; 
 
-    memset (&sockMsg, 0, sizeof(ipc_msg_payload_t));
+    mqd_t     mq;
+    struct    mq_attr attr;
+    /* initialize the queue attributes */
+    attr.mq_flags   = 0;
+    attr.mq_maxmsg  = MAX_QUEUE_LENGTH;
+    attr.mq_msgsize = sizeof(PPPEventQData);
+    attr.mq_curmsgs = 0;
+
+    PPPEventQData    eventMsg = { 0 };
+
+    /* create the message queue */
+    mq = mq_open(PPP_EVENT_QUEUE_NAME, O_CREAT | O_RDONLY | O_NONBLOCK, 0644, &attr);
+
+    if (-1 == mq)
+    {
+        CcspTraceError(("%s %d:Unable to open message queue: %s\n", __FUNCTION__, __LINE__, strerror(errno)));
+        PppMgr_closeIpcSocket(ipcListenFd);
+        pthread_exit(NULL);
+        return NULL;
+    }
+
 
     while (bRunning)
     {
-        if(PppMgr_receiveIpcSocket(ipcListenFd, (char*)&sockMsg, &msgSize) == ANSC_STATUS_FAILURE)
-        {
-            continue;
-        }
-        CcspTraceInfo(("[%s-%d] Message received  with size %d\n", __FUNCTION__, __LINE__, msgSize));
+        msgSize = 0;
+        memset (&sockMsg, 0, sizeof(ipc_msg_payload_t));
+        memset (&eventMsg, 0, sizeof(PPPEventQData));
+
+        PppMgr_receiveIpcSocket(ipcListenFd, (char*)&sockMsg, &msgSize);
 
         if(msgSize > 0)
         {
-            PppMgr_ProcessIpcMsg(sockMsg);
+            CcspTraceInfo(("[%s-%d] Message received  with size %d\n", __FUNCTION__, __LINE__, msgSize));
+            PppMgr_ProcessPppState(sockMsg);
         }
+
+        /* receive the message */
+        msgSize = mq_receive(mq, (char *)&eventMsg, sizeof(PPPEventQData), NULL);
+        if (msgSize > 0)
+        {
+            CcspTraceInfo(("%s %d: Q not empty\n", __FUNCTION__, __LINE__));
+            PppMgr_ProcessPppEvent(&eventMsg);
+        }
+        usleep(500000);
     }
+
+    mq_close(mq);
     PppMgr_closeIpcSocket(ipcListenFd);
 
     pthread_exit(NULL);
@@ -1158,60 +1234,4 @@ static ANSC_STATUS PppMgr_IpcServerInit()
     }
 
     return ANSC_STATUS_SUCCESS;
-}
-
-/* --------------------------------------------------------------------
-Function : PppGetInstanceNumber
-
-Decription: This API will return data model entry associated with ppp client pid value
------------------------------------------------------------------------*/
-static PSINGLE_LINK_ENTRY PppMgr_DmlGetLinkEntry(pid_t pid, char *interface)
-{
-
-    PSINGLE_LINK_ENTRY         pSLinkEntry             = NULL;
-    PDATAMODEL_PPP             pMyObject               = (PDATAMODEL_PPP      )g_pBEManager->hPPP;
-    PPPP_IF_LINK_OBJECT       pLinkContext2           = (PPPP_IF_LINK_OBJECT)NULL;
-    PDML_PPP_IF_FULL           pNewEntry               = (PDML_PPP_IF_FULL    )NULL;
-    int i = 0;
-
-    if(!pid)
-    {
-        CcspTraceInfo(("[%s-%d] pid is zero", __FUNCTION__, __LINE__));
-        return NULL;
-    }
-    pSLinkEntry = AnscSListGetFirstEntry(&pMyObject->IfList);
-
-    while ( pSLinkEntry )
-    {
-        pLinkContext2 = ACCESS_PPP_IF_LINK_OBJECT(pSLinkEntry);
-
-        pNewEntry = (PDML_PPP_IF_FULL)pLinkContext2->hContext;
-
-        if(pNewEntry)
-        {
-            pthread_mutex_lock(&pNewEntry->mDataMutex);
-
-            if ( pNewEntry->Info.pppPid == pid )
-            {
-                pthread_mutex_unlock(&pNewEntry->mDataMutex);
-
-                return pSLinkEntry;
-            }
-            else if (strncmp(pNewEntry->Cfg.Alias, interface, sizeof(pNewEntry->Cfg.Alias)) == 0)
-            {
-                /* The mapping using PID may not work in some cases. For eg, if pppd
-                restarts due to CHAP authentication failure etc. In this case, we should
-                try to map with interface name and update the PID information */
-                pNewEntry->Info.pppPid = PppMgr_getPppPid();
-                CcspTraceInfo(("[%s-%d] ppp daemon on %s interface may be restarted and updating new pid %d", __FUNCTION__, __LINE__, pNewEntry->Cfg.Alias, pNewEntry->Info.pppPid));
-                pthread_mutex_unlock(&pNewEntry->mDataMutex);
-                return pSLinkEntry;
-            }
-            pthread_mutex_unlock(&pNewEntry->mDataMutex);
-        }
-        pSLinkEntry   = AnscSListGetNextEntry(pSLinkEntry);
-    }
-
-    return NULL;
-
 }

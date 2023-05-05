@@ -41,6 +41,7 @@
 #include <sys/ioctl.h>
 #include <sys/ioctl.h>
 #include <utapi_util.h>
+#include <mqueue.h>
 
 #define MAXINSTANCE    128
 #define DNS_FILE "/var/run/ppp/resolv.conf"
@@ -51,6 +52,9 @@
 #define  DML_RR_NAME_PPPIFInsNum            "InstanceNumber"
 #define  DML_RR_NAME_PPPIFNextInsNunmber    "NextInstanceNumber"
 #define  DML_RR_NAME_PPPIFNewlyAdded        "NewlyAdded"
+
+#define UP  "Up"
+#define DOWN  "Down"
 
 #define WAN_COMPONENT_NAME    "eRT.com.cisco.spvtg.ccsp.wanmanager"
 #define WAN_DBUS_PATH    "/com/cisco/spvtg/ccsp/wanmanager"
@@ -89,11 +93,29 @@
 #define INTERFACE "wan0"
 #endif
 
+typedef enum _eventHandlingAction_
+{
+    PPPMGR_BUS_SET,
+    PPPMGR_EXEC_PPP_CLIENT
+} PPPMGR_EVENT_ACTION;
+
+typedef struct _PPPEventQData_ {
+    PPPMGR_EVENT_ACTION action;
+    INT WANInstance;
+    char * keyPath;     // DML object pattern
+    char * comPath;     // component path
+    char * busPath;     // bus path
+    char val[64];
+} PPPEventQData;
+
+
 ANSC_STATUS PppSListPushEntryByInsNum( PSLIST_HEADER pListHead, PPPP_IF_LINK_OBJECT pContext );
 
 ANSC_STATUS PppDmlAddIfEntry( ANSC_HANDLE hContext, PDML_PPP_IF_FULL pEntry );
 
 ANSC_STATUS PppDmlGetIfEntry( ANSC_HANDLE hContext, ULONG ulIndex, PDML_PPP_IF_FULL pEntry );
+
+ANSC_STATUS PppDmlGetIntfValuesFromPSM( ANSC_HANDLE hContext, ULONG  ulIndex, PDML_PPP_IF_FULL pEntry );
 
 ANSC_STATUS PppDmlSetIfValues ( ANSC_HANDLE hContext, ULONG ulIndex, ULONG ulInstanceNumber, char* pAlias );
 
@@ -105,7 +127,9 @@ ANSC_STATUS PppDmlSetIfCfg    ( ANSC_HANDLE hContext, PDML_PPP_IF_CFG pCfg );
 
 ANSC_STATUS PppDmlGetIfStats ( ANSC_HANDLE hContext, ULONG ulPppIfInstanceNumber, PDML_IF_STATS pStats, PDML_PPP_IF_FULL pEntry );
 
-ANSC_STATUS PppDmlIfReset( ANSC_HANDLE hContext, ULONG ulInstanceNumber );
+BOOL PppDmlIfEnable( ANSC_HANDLE hContext, ULONG ulInstanceNumber, PDML_PPP_IF_FULL pEntry);
+
+ANSC_STATUS PppDmlIfReset( ANSC_HANDLE hContext, ULONG ulInstanceNumber , PDML_PPP_IF_FULL pEntry);
 
 ULONG PppGetIfAddr( char* netdev );
 
@@ -119,11 +143,20 @@ ANSC_STATUS  PppMgr_checkPidExist( pid_t pppPid );
 
 ANSC_STATUS PppMgr_stopPppProcess( pid_t pid );
 
+ANSC_STATUS PppMgr_stopPppoe(void);
+
 ANSC_STATUS DmlWanmanagerSetParamValues( const char *pComponent, const char *pBus,
         const char *pParamName, const char *pParamVal, enum dataType_e type, unsigned int bCommitFlag );
 
-ANSC_STATUS DmlPppMgrGetParamValues(char *pComponent, char *pBus, char *pParamName, char *pReturnVal);
+ANSC_STATUS DmlPppMgrGetWanMgrInstanceNumber(char *pLowerLayers, INT *piInstanceNumber);
+
+static ANSC_STATUS DmlPppMgrGetParamValues(char *pComponent, char *pBus, char *pParamName, char *pReturnVal);
 
 ULONG GetUptimeinSeconds ();
 
+int PppMgr_RdkBus_SetParamValuesToDB( char *pParamName, char *pParamVal );
+
+int validateUsername( char* pString);
+
+ULONG DmlGetTotalNoOfPPPInterfaces ( ANSC_HANDLE hContext);
 #endif
