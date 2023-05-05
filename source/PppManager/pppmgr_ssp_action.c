@@ -31,8 +31,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "pppmgr_ssp_internal.h"
-#include "pppmgr_dml_plugin_main.h"
+
+#include "pppmgr_dml.h"
+#include "pppmgr_global.h"
 
 PCOMPONENT_COMMON_PPP_MANAGER            g_pComponentCommonPppManager      = NULL;
 PCCSP_CCD_INTERFACE                      pSsdCcdIf                         = (PCCSP_CCD_INTERFACE) NULL;

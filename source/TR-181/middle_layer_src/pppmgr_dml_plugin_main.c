@@ -32,8 +32,8 @@
  * limitations under the License.
  */
 
-#include "pppmgr_dml_plugin_main.h"
-#include "pppmgr_dml_plugin_main_apis.h"
+#include "pppmgr_global.h"
+#include "pppmgr_data.h"
 #include "pppmgr_dml.h"
 #include "pppmgr_dml_apis.h"
 

@@ -32,8 +32,8 @@
  * limitations under the License.
  */
 
-#include "pppmgr_ssp_global.h"
-#include "pppmgr_dml_plugin_main_apis.h"
+#include "pppmgr_global.h"
+#include "pppmgr_data.h"
 #include "pppmgr_dml.h"
 #include "pppmgr_dml_apis.h"
 #include "pppmgr_dml_ppp_apis.h"
@@ -44,28 +44,13 @@
 #define PPP_IF_NAME         "pppoa0"
 #define WAN_IF_NAME         "wan0"
 #define PPPoE_VLAN_IF_NAME  "vlan101"
-#define GET_PPPID_ATTEMPT 5
 
 extern char g_Subsystem[32];
 extern ANSC_HANDLE bus_handle;
 
 extern PBACKEND_MANAGER_OBJECT               g_pBEManager;
 
-static int set_syscfg(char *pValue,char *param)
-{
-    if((syscfg_set(NULL, param, pValue) != 0))
-    {
-        return -1;
-    }
-    else
-    {
-        if(syscfg_commit() != 0)
-        {
-            return -1;
-        }
-        return 0;
-    }
-}
+
 
 /***********************************************************************
 
@@ -861,10 +846,7 @@ Interface_SetParamBoolValue
     if( AnscEqualString(ParamName, "Enable", TRUE))
     {
         /* save update to backup */
-        pEntry->Cfg.bEnabled = bValue;
-
-        PppDmlIfEnable(NULL, pEntry->Cfg.InstanceNumber, pEntry);
-        retStatus = TRUE;
+        retStatus = PppMgr_EnableIf(pEntry->Cfg.InstanceNumber, bValue);
     }
 
     if( AnscEqualString(ParamName, "IPCPEnable", TRUE))
@@ -888,8 +870,7 @@ Interface_SetParamBoolValue
         /* save update to backup */
         if ( pEntry->Cfg.bEnabled && bValue )
         {
-            PppDmlIfReset(NULL, pEntry->Cfg.InstanceNumber, pEntry);
-            retStatus = TRUE;
+            retStatus = PppDmlIfReset(pEntry->Cfg.InstanceNumber);
         }
         else
         {

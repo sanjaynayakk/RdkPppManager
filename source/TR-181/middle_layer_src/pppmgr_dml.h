@@ -34,6 +34,7 @@
 
 #ifndef  _PPPMGR_DML_H_
 #define  _PPPMGR_DML_H_
+#include "pppmgr_global.h"
 
 #define DML_PPP_SUPPORTED_NCP_ATCP   0x01
 #define DML_PPP_SUPPORTED_NCP_IPCP   0x02
@@ -57,6 +58,9 @@
 //WANManager
 #define WAN_DBUS_PATH                    "/com/cisco/spvtg/ccsp/wanmanager"
 #define WAN_COMPONENT_NAME               "eRT.com.cisco.spvtg.ccsp.wanmanager"
+
+#define  DML_IF_NAME_LENGTH                    512
+#define  PPP_CREDS_MAX_LEN                     65
 
 typedef  struct
 _DML_IF_STATS
@@ -115,7 +119,7 @@ DML_PPP_CONN_STATUS, *PDML_PPP_CONN_STATUS;
 
 typedef  struct _DML_PPP_IF_CFG
 {
-    ULONG                           InstanceNumber;
+    UINT                           InstanceNumber;
     char                            Alias[DML_IF_NAME_LENGTH];
 
     BOOLEAN                         bEnabled;
@@ -127,8 +131,8 @@ typedef  struct _DML_PPP_IF_CFG
     ULONG                           AutoDisconnectTime;
     ULONG                           IdleDisconnectTime;
     ULONG                           WarnDisconnectDelay;
-    char                            Username[65];
-    char                            Password[65];
+    char                            Username[PPP_CREDS_MAX_LEN];
+    char                            Password[PPP_CREDS_MAX_LEN];
     USHORT                          MaxMRUSize;
     PPP_DML_CONN_TRIGGER       ConnectionTrigger;
     /*
@@ -142,6 +146,7 @@ typedef  struct _DML_PPP_IF_CFG
     BOOLEAN                         PassthroughEnable;
     char                            PassthroughDHCPPool[DML_IF_NAME_LENGTH];   /* Alias of the DHCP pool */
 	int                             WanInstanceNumber; 
+	int                             WanVirtIfaceInstance; 
 }
 DML_PPP_IF_CFG,  *PDML_PPP_IF_CFG;
 
@@ -262,5 +267,7 @@ typedef struct _RESET_THREAD_ARGS
     PDML_PPP_IF_FULL            pEntry;
 }
 RESET_THREAD_ARGS, *PRESET_THREAD_ARGS;
+
+void* PppMgr_StartPppdDaemon( void *arg );
 
 #endif

@@ -32,12 +32,13 @@
  * limitations under the License.
  */
 
-#include "pppmgr_dml_plugin_main_apis.h"
+#include "pppmgr_data.h"
 #include "pppmgr_dml_ppp_apis.h"
-#include "pppmgr_ssp_global.h"
+#include "pppmgr_global.h"
 #include "pppmgr_dml.h"
 
 extern void * g_pDslhDmlAgent;
+extern PBACKEND_MANAGER_OBJECT               g_pBEManager;
 
 /**********************************************************************
 
@@ -214,4 +215,30 @@ BackEndManagerInitialize
     return returnStatus;
 
 }
+
+DML_PPP_IF_FULL  * PppMgr_GetIfaceData_locked (UINT pppIfaceInstance)
+{
+    if (pppIfaceInstance <= 0 || DmlGetTotalNoOfPPPInterfaces(NULL) < pppIfaceInstance)
+    {
+        return NULL;
+    }
+
+    UINT iface_index = pppIfaceInstance - 1;
+
+    PDATAMODEL_PPP             pMyObject               = (PDATAMODEL_PPP      )g_pBEManager->hPPP;
+    PDML_PPP_IF_FULL           pPppTable                  = (PDML_PPP_IF_FULL    )pMyObject->PppTable;
+
+    pthread_mutex_lock(&pPppTable[iface_index].mDataMutex);
+    return &pPppTable[iface_index];
+}
+
+void PppMgr_GetIfaceData_release (DML_PPP_IF_FULL * pPppTable)
+{
+    if (pPppTable != NULL)
+    {
+        pthread_mutex_unlock(&pPppTable->mDataMutex);
+    }
+}
+
+
 

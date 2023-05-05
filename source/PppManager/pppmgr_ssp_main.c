@@ -32,9 +32,7 @@
  * limitations under the License.
  */
 
-#include "pppmgr_ssp_internal.h"
-#include "pppmgr_ssp_global.h"
-#include "pppmgr_ssp_messagebus_interface.h"
+#include "pppmgr_global.h"
 
 #define DEBUG_INI_NAME  "/etc/debug.ini"
 

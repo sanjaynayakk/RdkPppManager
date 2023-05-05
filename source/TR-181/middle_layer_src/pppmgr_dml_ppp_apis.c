@@ -32,16 +32,14 @@
  * limitations under the License.
  */
 
-#include "pppmgr_ssp_global.h"
-#include "pppmgr_dml_plugin_main_apis.h"
+#include "pppmgr_global.h"
+#include "pppmgr_data.h"
 #include "pppmgr_dml_ppp_apis.h"
 #include "pppmgr_dml.h"
 #include <regex.h>
-#include <dirent.h>
 
 #define NET_STATS_FILE "/proc/net/dev"
 #define PPPoE_VLAN_IF_NAME  "vlan101"
-#define GET_PPPID_ATTEMPT 5
 #define PPP_LCPEcho 30
 #define PPP_LCPEchoRetry 3
 
@@ -50,8 +48,6 @@ extern char g_Subsystem[32];
 extern ANSC_HANDLE bus_handle;
 
 extern PBACKEND_MANAGER_OBJECT               g_pBEManager;
-static void* PppMgr_StartPppdDaemon( void *arg );
-static void* PppMgr_ResetPppdDaemon( void *arg);
 
 ANSC_STATUS
 PppDmlGetSupportedNCPs
@@ -143,37 +139,154 @@ PPPDmlGetIfInfo
     return ANSC_STATUS_SUCCESS;
 }
 
-BOOL
-PppDmlIfEnable
-    (
-        ANSC_HANDLE                 hContext,
-        ULONG                       ulInstanceNumber,
-        PDML_PPP_IF_FULL            pEntry
-    )
+ANSC_STATUS PppMgr_SendPppdStartEventToQ (UINT InstanceNumber)
+{
+    PDML_PPP_IF_FULL pEntry=NULL;
+    pEntry = PppMgr_GetIfaceData_locked(InstanceNumber);
+    if (pEntry != NULL)
+    {
+        PPPEventQData eventData = {0};
+        eventData.action = PPPMGR_EXEC_PPP_CLIENT;
+        eventData.PppIfInstance = pEntry->Cfg.InstanceNumber;
+
+        if (PppMgr_SendDataToQ(&eventData) != ANSC_STATUS_SUCCESS)
+        {
+            CcspTraceError(("%s %d - Failed to send data to Q\n", __FUNCTION__, __LINE__));
+            PppMgr_GetIfaceData_release(pEntry);
+            return ANSC_STATUS_FAILURE;
+        }
+        pEntry->Cfg.bEnabled = true;
+        CcspTraceInfo(("%s %d: posting PPPMGR_EXEC_PPP_CLIENT on Queue for %d\n", __FUNCTION__, __LINE__, eventData.PppIfInstance));
+        PppMgr_GetIfaceData_release(pEntry);
+        return ANSC_STATUS_SUCCESS;
+    }
+    return ANSC_STATUS_FAILURE;
+}
+
+bool PppMgr_EnableIf (UINT InstanceNumber, bool Enable)
 {
 
+    if (Enable == true)
+    {
+        CcspTraceInfo(("%s %d: Handling PPP client start for instance %d\n", __FUNCTION__, __LINE__, InstanceNumber));
+        if (PppMgr_SendPppdStartEventToQ(InstanceNumber) != ANSC_STATUS_SUCCESS)
+        {
+            CcspTraceInfo(("%d %s: posting PPPMGR_EXEC_PPP_CLIENT event to Q failed for instance %d\n", __FUNCTION__, __LINE__, InstanceNumber));
+            return false;
+        }
+    }
+    else
+    {
+        CcspTraceInfo (("%s %d: disabling PPP client on instance %d\n", __FUNCTION__, __LINE__, InstanceNumber));
+        if (PppMgr_StopPppClient(InstanceNumber) != ANSC_STATUS_SUCCESS)
+        {
+            CcspTraceInfo(("%d %s: failed to stop ppp client on instace %d\n", __FUNCTION__, __LINE__, InstanceNumber));
+            return false;
+        }
+    }
+    return true;
+}
+
+static int PppMgr_GetWanIfaceInstance (UINT InstanceNumber, int * WanIfaceInstance, int * WanVirtIfaceInstance)
+{
+    if (InstanceNumber <= 0 || WanIfaceInstance == NULL || WanVirtIfaceInstance == NULL)
+    {
+        CcspTraceError(("%s %d: Invalid args\n", __FUNCTION__, __LINE__));
+        return -1;
+    }
+
+    INT iTotalNoofEntries;
+    INT iTotalNoofVirtualIface;
+    INT iIfaceCount;
+    INT iVcount;
+    char acTmpReturnValue[256] = {0};
+    char acTmpQueryParam[256] = {0};
+    char PppInterfacePath[128] = {0};
+
+    if (ANSC_STATUS_FAILURE == DmlPppMgrGetParamValues(WAN_COMPONENT_NAME, WAN_DBUS_PATH, WAN_NOE_PARAM_NAME, acTmpReturnValue))
+    {
+        CcspTraceError(("%s %d Failed to get param value\n", __FUNCTION__, __LINE__));
+        return ANSC_STATUS_FAILURE;
+    }
+
+    // No of Wan Interfaces
+    iTotalNoofEntries = atoi(acTmpReturnValue);
+    CcspTraceInfo(("%s %d - TotalNoofEntries:%d\n", __FUNCTION__, __LINE__, iTotalNoofEntries));
+
+    if (0 >= iTotalNoofEntries)
+    {
+        CcspTraceError(("%s %d: Cannot get number of WanInterface Entry\n", __FUNCTION__, __LINE__));
+        return ANSC_STATUS_FAILURE;
+    }
+
+    snprintf(PppInterfacePath, sizeof(PppInterfacePath), PPP_IFACE_PATH , InstanceNumber);
+    CcspTraceInfo(("%s %d: comparing Wan Virtual Interfaces with %s\n", __FUNCTION__, __LINE__, PppInterfacePath));
+
+    // for each Wan Interface
+    for (iIfaceCount = 1; iIfaceCount <= iTotalNoofEntries; iIfaceCount++)
+    {
+        // get total no of VirtualInterface
+        snprintf(acTmpQueryParam, sizeof(acTmpQueryParam), WAN_NO_OF_VIRTUAL_IFACE_PARAM_NAME, iIfaceCount);
+        if (ANSC_STATUS_FAILURE == DmlPppMgrGetParamValues(WAN_COMPONENT_NAME, WAN_DBUS_PATH, acTmpQueryParam, acTmpReturnValue))
+        {
+            CcspTraceError(("%s %d Failed to get param value %s\n", __FUNCTION__, __LINE__, acTmpQueryParam));
+            return ANSC_STATUS_FAILURE;
+        }
+        iTotalNoofVirtualIface = atoi (acTmpReturnValue);
+        CcspTraceInfo(("%s %d - TotalNoof Wan Virtual Interface:%d\n", __FUNCTION__, __LINE__, iTotalNoofVirtualIface));
+
+        // for each Virtual Interface
+        for (iVcount = 1; iVcount <= iTotalNoofVirtualIface; iVcount++)
+        {
+            snprintf(acTmpQueryParam, sizeof(acTmpQueryParam), PPP_WAN_VIRTUAL_IFACE_NAME, iIfaceCount, iVcount);
+            if (ANSC_STATUS_FAILURE == DmlPppMgrGetParamValues(WAN_COMPONENT_NAME, WAN_DBUS_PATH, acTmpQueryParam, acTmpReturnValue))
+            {
+                CcspTraceError(("%s %d Failed to get param value %s\n", __FUNCTION__, __LINE__, acTmpQueryParam));
+                return ANSC_STATUS_FAILURE;
+            }
+
+            if (strcmp(acTmpReturnValue, PppInterfacePath) == 0)
+            {
+                *WanIfaceInstance = iIfaceCount;
+                *WanVirtIfaceInstance = iVcount;
+                return ANSC_STATUS_SUCCESS;
+            }
+        }
+    }
+    *WanIfaceInstance = -1;
+    *WanVirtIfaceInstance = -1;
+    return ANSC_STATUS_FAILURE;
+
+}
+
+
+ANSC_STATUS
+PppMgr_StartPppClient (UINT InstanceNumber)
+{
+    int ret ;
+    PDML_PPP_IF_FULL  pEntry = NULL;
+    char auth_proto[8] = { 0 };
+    char VLANInterfaceName[32] = { 0 };
     char command[1024] = { 0 };
     char config_command[1024] = { 0 };
-    char service_name[256] = { 0 };
-    char auth_proto[8] = { 0 };
-    pthread_t pppdThreadId;
-    char buff[64] = { 0 };
-    char vlan_id[10] = { 0 };
-    char physical_interface[14]= { 0 };
-    char VLANInterfaceName[32] = { 0 };
-    int ret ;
     char acTmpQueryParam[256] = {0};
+    int WanIfaceInstance  = -1;
+    int WanVirtIfaceInstance  = -1;
 
-    pthread_mutex_lock(&pEntry->mDataMutex);
-
-    if(pEntry->Cfg.bEnabled == true )
+    PppMgr_GetWanIfaceInstance(InstanceNumber, &WanIfaceInstance, &WanVirtIfaceInstance);
+    if ((WanIfaceInstance == -1) || (WanVirtIfaceInstance == -1))
     {
-        CcspTraceInfo (("%s %d: enabling PPP on interface %d\n", __FUNCTION__, __LINE__, ulInstanceNumber));
+        CcspTraceError(("%s %d: Unable to get Wan Iface Instance\n", __FUNCTION__, __LINE__));
+        return ANSC_STATUS_FAILURE;
+    }
+
+    pEntry = PppMgr_GetIfaceData_locked (InstanceNumber);
+    {
         if(ANSC_STATUS_SUCCESS == PppMgr_checkPidExist(pEntry->Info.pppPid))
         {
             CcspTraceInfo(("pppd is already running \n"));
-            pthread_mutex_unlock(&pEntry->mDataMutex);
-            return TRUE;
+            PppMgr_GetIfaceData_release(pEntry);
+            return ANSC_STATUS_SUCCESS;
         }
 
         pEntry->Info.pppPid = 0;
@@ -182,10 +295,15 @@ PppDmlIfEnable
         platform_hal_GetPppUserName (pEntry->Cfg.Username, sizeof(pEntry->Cfg.Username));
         platform_hal_GetPppPassword (pEntry->Cfg.Password, sizeof(pEntry->Cfg.Password));
 
-        if((strcmp(pEntry->Info.Name,"") != 0) && (strcmp(pEntry->Info.InterfaceServiceName,"") != 0) &&
-                (strcmp(pEntry->Cfg.Username,"") != 0) && (strcmp(pEntry->Cfg.Password,"") != 0) &&
-                (pEntry->Info.AuthenticationProtocol > 0))
+        if((strlen(pEntry->Info.Name) == 0) || (strlen(pEntry->Info.InterfaceServiceName) == 0) ||
+                (strlen(pEntry->Cfg.Username) == 0) || (strlen(pEntry->Cfg.Password) == 0) ||
+                (pEntry->Info.AuthenticationProtocol <= 0))
         {
+            CcspTraceError(("%s %d: unable to get PPP params\n", __FUNCTION__, __LINE__));
+            PppMgr_GetIfaceData_release(pEntry);
+            return ANSC_STATUS_FAILURE;
+        }
+
             if((pEntry->Info.AuthenticationProtocol == DML_PPP_AUTH_CHAP) ||
                     (pEntry->Info.AuthenticationProtocol ==  DML_PPP_AUTH_PAP))
             {
@@ -196,6 +314,7 @@ PppDmlIfEnable
                 /* support for mschap */
                 sprintf(auth_proto,"4");
             }
+
             if(pEntry->Cfg.LinkType == DML_PPPoA_LINK_TYPE)
             {
                 CcspTraceInfo(("%s %d: PPPoA_LINK_TYPE: constructing arguments\n", __FUNCTION__, __LINE__));
@@ -232,8 +351,8 @@ PppDmlIfEnable
                     if(ANSC_STATUS_FAILURE == DmlPppMgrGetParamValues(WAN_COMPONENT_NAME, WAN_DBUS_PATH, acTmpQueryParam, VLANInterfaceName))
                     {
                         CcspTraceError(("%s %d Failed to get param value\n", __FUNCTION__, __LINE__));
-                        pthread_mutex_unlock(&pEntry->mDataMutex);
-                        return ANSC_STATUS_FAILURE;
+                    PppMgr_GetIfaceData_release(pEntry);
+                    return ANSC_STATUS_FAILURE;
                     } 
                 }
 
@@ -253,87 +372,59 @@ PppDmlIfEnable
                 }
 #endif
             }
-            CcspTraceInfo(("parameters were set\n"));
-        }
-        else
-        {
-            CcspTraceError(("%s %d: unable to get PPP params\n", __FUNCTION__, __LINE__));
-            pthread_mutex_unlock(&pEntry->mDataMutex);
-            return FALSE;
-        }
         CcspTraceInfo(("command to execute is  '%s'\n", command));
-        PPPEventQData eventData = {0};
 
-        eventData.action = PPPMGR_EXEC_PPP_CLIENT;
-        eventData.WANInstance = ulInstanceNumber;
-        strncpy(eventData.val, command, sizeof(eventData.val) - 1);
+        system(command);
 
-        if (PppMgr_SendDataToQ(&eventData) != ANSC_STATUS_SUCCESS)
-        {
-            CcspTraceError(("%s %d - Failed to send data to Q\n", __FUNCTION__, __LINE__));
-            pthread_mutex_unlock(&pEntry->mDataMutex);
-            return FALSE;
+        pEntry->Info.pppPid = PppMgr_getPppPid(NULL);
+
+//        DmlPppMgrGetWanMgrInstanceNumber(pEntry->Cfg.LowerLayers, &(pEntry->Cfg.WanInstanceNumber));
+        pEntry->Cfg.WanInstanceNumber = WanIfaceInstance;
+        pEntry->Cfg.WanVirtIfaceInstance = WanVirtIfaceInstance;
+  
+        PppMgr_GetIfaceData_release(pEntry);
         }
+    return ANSC_STATUS_SUCCESS;
 
-        // TODO - check lock in this function
-        /* lock while updating pid */
 
-        // update Wan Interface instance 
-        DmlPppMgrGetWanMgrInstanceNumber(pEntry->Cfg.LowerLayers, &(pEntry->Cfg.WanInstanceNumber));
-        CcspTraceInfo(("%s %d: PPP Interface %d WanInterface instance: %d\n", __FUNCTION__, __LINE__, pEntry->Cfg.InstanceNumber, pEntry->Cfg.WanInstanceNumber));
+}
 
-    }
-    else
+ANSC_STATUS PppMgr_StopPppClient (UINT InstanceNumber)
+{
+    PDML_PPP_IF_FULL  pEntry = NULL;
+    pEntry = PppMgr_GetIfaceData_locked(InstanceNumber);
+    if (pEntry != NULL)
     {
-        CcspTraceInfo (("%s %d: disabling PPP on interface %d\n", __FUNCTION__, __LINE__, ulInstanceNumber));
+        pEntry->Cfg.bEnabled = false;
 #ifdef USE_PPP_DAEMON
         PppMgr_stopPppProcess(pEntry->Info.pppPid);
-
         pEntry->Info.pppPid = 0;
 #else
         PppMgr_stopPppoe();
 #endif
+        PppMgr_GetIfaceData_release(pEntry);
+        pEntry = NULL;
+        return ANSC_STATUS_SUCCESS;
     }
-
-    pthread_mutex_unlock(&pEntry->mDataMutex);
-    return TRUE;
+    return ANSC_STATUS_FAILURE;
 }
 
-ANSC_STATUS
-PppDmlIfReset
-    (
-        ANSC_HANDLE                 hContext,
-        ULONG                       ulInstanceNumber,
-        PDML_PPP_IF_FULL            pEntry
-    )
+
+ANSC_STATUS PppDmlIfReset (ULONG InstanceNumber )
 {
-    pthread_t pppdThreadId;
-    PRESET_THREAD_ARGS pthread_args;
-    pthread_args = malloc(sizeof(RESET_THREAD_ARGS) * 1);
-    pthread_args->pEntry=pEntry;
-    pthread_args->ulInstanceNumber = ulInstanceNumber;
-    int iErrorCode = pthread_create( &pppdThreadId, NULL, &PppMgr_ResetPppdDaemon,pthread_args);
-    if( 0 != iErrorCode )
+    CcspTraceInfo (("%s %d: disabling PPP client on instance %d\n", __FUNCTION__, __LINE__, InstanceNumber));
+    if (PppMgr_StopPppClient(InstanceNumber) != ANSC_STATUS_SUCCESS)
     {
-        CcspTraceInfo(("%s %d - Failed to start Pppmgr_ResetPppdDaemon  %d\n", __FUNCTION__, __LINE__,iErrorCode ));
+        CcspTraceInfo(("%d %s: failed to stop ppp client on instace %d\n", __FUNCTION__, __LINE__, InstanceNumber));
+        return false;
     }
-
-    return ANSC_STATUS_SUCCESS;
-}
-
-static void* PppMgr_ResetPppdDaemon( void *arg )
-{
-    //TODO : Need to Revisit
-    PRESET_THREAD_ARGS pReset = arg;
-    pReset->pEntry->Cfg.bEnabled = false;
-    sleep(5);
-    PppDmlIfEnable(NULL,pReset->ulInstanceNumber,pReset->pEntry);
-    sleep(10);
-    pReset->pEntry->Cfg.bEnabled = true;
-    PppDmlIfEnable(NULL,pReset->ulInstanceNumber,pReset->pEntry);
-    free(arg);
-    pthread_exit(NULL);
-    return NULL;
+    CcspTraceInfo(("%s %d: Handling PPP client start for instance %d\n", __FUNCTION__, __LINE__, InstanceNumber));
+    if (PppMgr_SendPppdStartEventToQ(InstanceNumber) != ANSC_STATUS_SUCCESS)
+    {
+        CcspTraceInfo(("%d %s: posting PPPMGR_EXEC_PPP_CLIENT event to Q failed for instance %d\n", __FUNCTION__, __LINE__, InstanceNumber));
+        return false;
+    }
+    return true;
 }
 
 ANSC_STATUS
@@ -341,26 +432,6 @@ PppDmlGetIfCfg
     (
         ANSC_HANDLE                 hContext,
         PDML_PPP_IF_CFG        pCfg        /* Identified by InstanceNumber */
-    )
-{
-    return ANSC_STATUS_SUCCESS;
-}
-
-ANSC_STATUS
-PppDmlAddIfEntry
-    (
-        ANSC_HANDLE                 hContext,
-        PDML_PPP_IF_FULL       pEntry
-    )
-{
-    return ANSC_STATUS_SUCCESS;
-}
-
-ANSC_STATUS
-PppDmlDelIfEntry
-    (
-        ANSC_HANDLE                 hContext,
-        ULONG                       ulInstanceNumber
     )
 {
     return ANSC_STATUS_SUCCESS;
@@ -493,7 +564,7 @@ PppDmlGetIntfValuesFromPSM
         return ANSC_STATUS_FAILURE;
         }
 
-    // TODO : init mutex
+    // init mutex
     pthread_mutexattr_t     muttex_attr;
     pthread_mutexattr_settype(&muttex_attr, PTHREAD_MUTEX_RECURSIVE);
     pthread_mutex_init(&(pEntry->mDataMutex), &(muttex_attr));
@@ -635,35 +706,6 @@ PppDmlGetIntfValuesFromPSM
     return ANSC_STATUS_SUCCESS;
 }
 
-ANSC_STATUS PppMgr_checkPidExist(pid_t pppPid)
-{
-
-    pid_t pid = 0;
-    char line[64] = { 0 };
-    FILE *command = NULL;
-
-    if(pppPid)
-    {
-        command = popen("ps | grep pppd | grep -v grep | awk '{print $1}'","r");
-
-        if(command != NULL)
-    {
-            while(fgets(line, 64, command))
-        {
-                pid = strtoul(line, NULL,10);
-
-                if(pid == pppPid)
-            {
-                    pclose(command);
-                return ANSC_STATUS_SUCCESS;
-            }
-        }
-            pclose(command);
-        }
-
-    }
-    return ANSC_STATUS_FAILURE;
-}
 
 ANSC_STATUS PppMgr_stopPppProcess(pid_t pid)
 {
@@ -678,234 +720,6 @@ ANSC_STATUS PppMgr_stopPppoe(void)
     system("/usr/sbin/pppoe-stop");
 
     return ANSC_STATUS_SUCCESS;
-}
-
-/*
- * find_strstr ()
- * @description: /proc/pid/cmdline contains command line args in format "args1\0args2".
-                 This function will find substring even if there is a end of string character
- * @params     : basestr - base string eg: "hello\0world"
-                 basestr_len - length of basestr eg: 11 for "hello\0world"
-                 substr - sub string eg: "world"
-                 substr_len - length of substr eg: 5 for "world"
- * @return     : SUCCESS if matches, else returns failure
- *
- */
-int find_strstr (char * basestr, int basestr_len, char * substr, int substr_len)
-{
-    if ((basestr == NULL) || (substr == NULL))
-    {
-        return ANSC_STATUS_FAILURE;
-    }
-
-    if (basestr_len <= substr_len)
-    {
-        return ANSC_STATUS_FAILURE;
-    }
-
-    int i = 0, j = 0;
-
-    for (i = 0; i < basestr_len; i++)
-    {
-        if (basestr[i] == substr[j])
-    {
-            for (; ((j < substr_len) && (i < basestr_len)); j ++, i++)
-            {
-                if (basestr[i] != substr[j])
-        {
-                    j=0;
-                    break;
-                }
-
-                if (j == substr_len - 1)
-                    return ANSC_STATUS_SUCCESS;
-            }
-        }
-    }
-    return ANSC_STATUS_FAILURE;
-}
-
-/*
- * strtol64 ()
- * @description: utility call to check if string is a decimal number - used to check if /proc/<pid> is actually as pid
- * @params     : str - string to check if its a number
-                 endptr - output param to point to end of string
-                 val - output param to send out the pid
- * @return     : if str is a pid then SUCCESS, else FAILURE
- *
- */
-static int strtol64(const char *str, char **endptr, int32_t base, int64_t *val)
-{
-    int ret = SUCCESS;
-    char *localEndPtr=NULL;
-
-    errno = 0;  /* set to 0 so we can detect ERANGE */
-
-    *val = strtoll(str, &localEndPtr, base);
-
-    if ((errno != 0) || (*localEndPtr != '\0'))
-    {
-        *val = 0;
-        ret = ANSC_STATUS_FAILURE;
-    }
-
-    if (endptr != NULL)
-    {
-        *endptr = localEndPtr;
-    }
-
-    return ret;
-}
-
-
-/*
- * check_proc_entry_for_pid ()
- * @description: check the contents of /proc directory to match the process name
- * @params     : name - process name
-                 args - optional parameter - can check running process argument and return
-                 eg: if 2 pppd are running 1) pppd -i erouter0 2) pppd -i erouter1
-                 if args == "-ierouter0", pid of first udhcpc is returned
- * @return     : returns the pid if proc entry exists
- *
- */
-static int check_proc_entry_for_pid (char * name, char * args)
-{
-    if (name == NULL)
-    {
-        CcspTraceError(("%s %d: Invalid args\n", __FUNCTION__, __LINE__));
-        return 0;
-    }
-
-    DIR *dir;
-    FILE *fp;
-    struct dirent *dent;
-    bool found=false;
-    int rc, p, i;
-    int64_t pid;
-    int rval = 0;
-    char processName[256];
-    char cmdline[512] = {0};
-    char filename[256];
-    char status = 0;
-
-    if (NULL == (dir = opendir("/proc")))
-    {
-        CcspTraceError(("%s %d:could not open /proc\n", __FUNCTION__, __LINE__));
-        return 0;
-    }
-
-    while (!found && (dent = readdir(dir)) != NULL)
-    {
-        if ((dent->d_type == DT_DIR) &&
-                (ANSC_STATUS_SUCCESS == strtol64(dent->d_name, NULL, 10, &pid)))
-        {
-            snprintf(filename, sizeof(filename), "/proc/%lld/stat", (long long int) pid);
-            fp = fopen(filename, "r");
-            if (fp == NULL)
-            {
-                continue;
-            }
-            memset(processName, 0, sizeof(processName));
-            rc = fscanf(fp, "%d (%255s %c ", &p, processName, &status);
-            fclose(fp);
-
-            if (rc >= 2)
-            {
-                i = strlen(processName);
-                if (i > 0)
-                {
-                    if (processName[i-1] == ')')
-                        processName[i-1] = 0;
-                }
-            }
-
-            if (!strcmp(processName, name))
-            {
-                if ((status == 'R') || (status == 'S'))
-                {
-                    if (args != NULL)
-                    {
-                        // argument to be verified before returning pid
-                        CcspTraceInfo(("%s %d: %s running in pid %lld.. checking for cmdline param %s\n", __FUNCTION__, __LINE__, name, (long long int) pid, args));
-                        snprintf(filename, sizeof(filename), "/proc/%lld/cmdline", (long long int) pid);
-                        fp = fopen(filename, "r");
-                        if (fp == NULL)
-                        {
-                            CcspTraceError(("%s %d: could not open %s\n", __FUNCTION__, __LINE__, filename));
-                            continue;
-                        }
-                        CcspTraceInfo(("%s %d: opening file %s\n", __FUNCTION__, __LINE__, filename));
-
-                        memset (cmdline, 0, sizeof(cmdline));
-                        int num_read ;
-                        if ((num_read = fread(cmdline, 1, sizeof(cmdline)-1 , fp)) > 0)
-                        {
-                            cmdline[num_read] = '\0';
-                            CcspTraceInfo(("%s %d: comparing cmdline from proc:%s with %s\n", __FUNCTION__, __LINE__, cmdline, args));
-                            if (find_strstr(cmdline, sizeof(cmdline), args, strlen(args)) == ANSC_STATUS_SUCCESS)
-                            {
-                                rval = pid;
-                                found = true;
-                            }
-                        }
-
-                        fclose(fp);
-                    }
-                    else
-                    {
-                        // no argument passed, so return pid of running process
-                        rval = pid;
-                        found = true;
-                    }
-                }
-                else
-                {
-                    CcspTraceError(("%s %d: %s running, but is in %c mode\n", __FUNCTION__, __LINE__, filename, status));
-                }
-            }
-        }
-    }
-
-    closedir(dir);
-
-    return rval;
-
-}
-
-pid_t PppMgr_getPppPid(char * ifname)
-{
-    int waitTime = 0;
-    pid_t pid = 0;
-
-    while (waitTime <= GET_PPPID_ATTEMPT)
-    {
-        pid = check_proc_entry_for_pid("pppd", ifname);
-
-        if (pid != 0)
-                {
-            break;
-        }
-        sleep(1);
-        waitTime++;
-    }
-
-#if 0
-    char line[64] = { 0 };
-    FILE *command = NULL;
-    pid_t pid = 0;
-
-    command = popen("pidof pppd", "r");
-
-    if(command != NULL)
-    {
-        fgets(line, 64, command);
-
-        pid = strtoul(line, NULL,10);
-
-        pclose(command);
-    }
-    return pid;
-#endif
 }
 
 static ANSC_STATUS DmlPppMgrGetParamValues(char *pComponent, char *pBus, char *pParamName, char *pReturnVal)

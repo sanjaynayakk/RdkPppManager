@@ -55,15 +55,27 @@
 
 #define UP  "Up"
 #define DOWN  "Down"
+#define PHY_IF_MAC_PATH       "/sys/class/net/atm0/address"
+#define DHCPV6_PATH           "/etc/dibbler/%s/"
+#define DHCPV6_DUID_FILE      "client-duid"
+#if defined (DUID_UUID_ENABLE)
+#define DUID_TYPE "0004"  /* duid-type duid-uuid 4 */
+#else
+#define DUID_TYPE "00:03:"  /* duid-type duid-ll 3 */
+#define HW_TYPE "00:01:"    /* hw type is always 1 */
+#endif
 
 #define WAN_COMPONENT_NAME    "eRT.com.cisco.spvtg.ccsp.wanmanager"
 #define WAN_DBUS_PATH    "/com/cisco/spvtg/ccsp/wanmanager"
 /* PPP wan manager params */
+#define PPP_IFACE_PATH  "Device.PPP.Interface.%d"
+#define PPP_WAN_VIRTUAL_IFACE_NAME  "Device.X_RDK_WanManager.Interface.%d.VirtualInterface.%d.PPP.Interface"
+#define WAN_NO_OF_VIRTUAL_IFACE_PARAM_NAME    "Device.X_RDK_WanManager.Interface.%d.VirtualInterfaceNumberOfEntries"
 #if defined(WAN_MANAGER_UNIFICATION_ENABLED)
-#define PPP_LCP_STATUS_PARAM_NAME    "Device.X_RDK_WanManager.Interface.%d.VirtualInterface.1.PPP.LCPStatus"
-#define PPP_LINK_STATUS_PARAM_NAME    "Device.X_RDK_WanManager.Interface.%d.VirtualInterface.1.PPP.Status"
-#define PPP_IPCP_STATUS_PARAM_NAME    "Device.X_RDK_WanManager.Interface.%d.VirtualInterface.1.PPP.IPCPStatus"
-#define PPP_IPV6CP_STATUS_PARAM_NAME    "Device.X_RDK_WanManager.Interface.%d.VirtualInterface.1.PPP.IPv6CPStatus"
+#define PPP_LCP_STATUS_PARAM_NAME    "Device.X_RDK_WanManager.Interface.%d.VirtualInterface.%d.PPP.LCPStatus"
+#define PPP_LINK_STATUS_PARAM_NAME    "Device.X_RDK_WanManager.Interface.%d.VirtualInterface.%d.PPP.Status"
+#define PPP_IPCP_STATUS_PARAM_NAME    "Device.X_RDK_WanManager.Interface.%d.VirtualInterface.%d.PPP.IPCPStatus"
+#define PPP_IPV6CP_STATUS_PARAM_NAME    "Device.X_RDK_WanManager.Interface.%d.VirtualInterface.%d.PPP.IPv6CPStatus"
 /* wan manager params */
 #define WAN_NOE_PARAM_NAME    "Device.X_RDK_WanManager.InterfaceNumberOfEntries"
 #define WAN_PHY_PATH_PARAM_NAME    "Device.X_RDK_WanManager.Interface.%d.BaseInterface"
@@ -101,17 +113,13 @@ typedef enum _eventHandlingAction_
 
 typedef struct _PPPEventQData_ {
     PPPMGR_EVENT_ACTION action;
-    INT WANInstance;
+    INT PppIfInstance;
     char * keyPath;     // DML object pattern
     char * comPath;     // component path
     char * busPath;     // bus path
     char val[64];
 } PPPEventQData;
 
-
-ANSC_STATUS PppSListPushEntryByInsNum( PSLIST_HEADER pListHead, PPPP_IF_LINK_OBJECT pContext );
-
-ANSC_STATUS PppDmlAddIfEntry( ANSC_HANDLE hContext, PDML_PPP_IF_FULL pEntry );
 
 ANSC_STATUS PppDmlGetIfEntry( ANSC_HANDLE hContext, ULONG ulIndex, PDML_PPP_IF_FULL pEntry );
 
@@ -121,15 +129,13 @@ ANSC_STATUS PppDmlSetIfValues ( ANSC_HANDLE hContext, ULONG ulIndex, ULONG ulIns
 
 ANSC_STATUS PPPDmlGetIfInfo( ANSC_HANDLE hContext, ULONG ulInstanceNumber, PDML_PPP_IF_INFO pInfo );
 
-ANSC_STATUS PppDmlDelIfEntry( ANSC_HANDLE hContext, ULONG ulInstanceNumber );
-
 ANSC_STATUS PppDmlSetIfCfg    ( ANSC_HANDLE hContext, PDML_PPP_IF_CFG pCfg );
 
 ANSC_STATUS PppDmlGetIfStats ( ANSC_HANDLE hContext, ULONG ulPppIfInstanceNumber, PDML_IF_STATS pStats, PDML_PPP_IF_FULL pEntry );
 
 BOOL PppDmlIfEnable( ANSC_HANDLE hContext, ULONG ulInstanceNumber, PDML_PPP_IF_FULL pEntry);
 
-ANSC_STATUS PppDmlIfReset( ANSC_HANDLE hContext, ULONG ulInstanceNumber , PDML_PPP_IF_FULL pEntry);
+ANSC_STATUS PppDmlIfReset( ULONG ulInstanceNumber);
 
 ULONG PppGetIfAddr( char* netdev );
 
@@ -159,4 +165,14 @@ int PppMgr_RdkBus_SetParamValuesToDB( char *pParamName, char *pParamVal );
 int validateUsername( char* pString);
 
 ULONG DmlGetTotalNoOfPPPInterfaces ( ANSC_HANDLE hContext);
+
+void PppMgr_GenerateDuidFile (char *wanName);
+
+void PppMgr_RemoveDuidFile (char *wanName);
+
+DML_PPP_IF_FULL  * PppMgr_GetIfaceData_locked (UINT pppIfaceInstance);
+
+DML_PPP_IF_FULL  * PppMgr_GetIfaceData_locked (UINT pppIfaceInstance);
+
+ANSC_STATUS PppMgr_StopPppClient (UINT InstanceNumber);
 #endif

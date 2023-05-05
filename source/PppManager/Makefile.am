@@ -40,7 +40,7 @@ pppmanager_DEPENDENCIES= \
     ${top_builddir}/source/TR-181/middle_layer_src/libpppmanager_middle_layer_src.la 
 
 pppmanager_CFLAGS = $(SYSTEMD_CFLAGS) $(NONROOT_CFLAGS)
-pppmanager_SOURCES = pppmgr_ssp_action.c pppmgr_ssp_main.c pppmgr_ssp_messagebus_interface.c pppmgr_ipc.c pppmgr_mgr.c
+pppmanager_SOURCES = pppmgr_ssp_action.c pppmgr_ssp_main.c pppmgr_ssp_messagebus_interface.c pppmgr_ipc.c
 pppmanager_LDFLAGS = -lccsp_common -ldl $(SYSTEMD_LDFLAGS) -lrdkloggers -lhal_platform -lnanomsg -lrt
 pppmanager_LDADD =  $(pppmanager_DEPENDENCIES)
 
