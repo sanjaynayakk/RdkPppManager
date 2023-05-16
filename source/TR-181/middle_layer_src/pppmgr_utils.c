@@ -623,3 +623,30 @@ pid_t PppMgr_getPppPid(char * ifname)
 
     return pid;
 }
+
+int PppMgr_getIfaceDataWithPid (pid_t pid)
+{
+
+    PDML_PPP_IF_FULL pEntry=NULL; 
+    int InstanceNumber =  -1 ;
+    int totalNoOfPppIface = DmlGetTotalNoOfPPPInterfaces(NULL);
+
+    for (int i =1; i <= totalNoOfPppIface; i++)
+    {
+        pEntry = PppMgr_GetIfaceData_locked(i);
+        if (pEntry != NULL)
+        {
+            if (pEntry->Info.pppPid == pid)
+            {
+                InstanceNumber = (int)pEntry->Cfg.InstanceNumber;
+                PppMgr_GetIfaceData_release(pEntry);
+                break;
+            }
+            PppMgr_GetIfaceData_release(pEntry);
+            pEntry = NULL;
+        }
+    }
+
+    return InstanceNumber;
+
+}

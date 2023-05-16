@@ -261,13 +261,4 @@ typedef  struct _DATAMODEL_PPP
 }
 DATAMODEL_PPP,  *PDATAMODEL_PPP;
 
-typedef struct _RESET_THREAD_ARGS
-{
-    ULONG                       ulInstanceNumber;
-    PDML_PPP_IF_FULL            pEntry;
-}
-RESET_THREAD_ARGS, *PRESET_THREAD_ARGS;
-
-void* PppMgr_StartPppdDaemon( void *arg );
-
 #endif

@@ -378,7 +378,6 @@ PppMgr_StartPppClient (UINT InstanceNumber)
 
         pEntry->Info.pppPid = PppMgr_getPppPid(NULL);
 
-//        DmlPppMgrGetWanMgrInstanceNumber(pEntry->Cfg.LowerLayers, &(pEntry->Cfg.WanInstanceNumber));
         pEntry->Cfg.WanInstanceNumber = WanIfaceInstance;
         pEntry->Cfg.WanVirtIfaceInstance = WanVirtIfaceInstance;
   
@@ -766,63 +765,6 @@ static ANSC_STATUS DmlPppMgrGetParamValues(char *pComponent, char *pBus, char *p
     }
 
     return ANSC_STATUS_FAILURE;
-}
-
-ANSC_STATUS DmlPppMgrGetWanMgrInstanceNumber(char *pLowerLayers, INT *piInstanceNumber)
-{
-    char acTmpReturnValue[256] = {0};
-    char acTmpQueryParam[256] = {0};
-    INT iLoopCount;
-    INT iTotalNoofEntries;
-
-    //Validate buffer
-    if ((NULL == pLowerLayers) || (NULL == piInstanceNumber))
-    {
-        CcspTraceError(("%s Invalid Buffer\n", __FUNCTION__));
-        return ANSC_STATUS_FAILURE;
-    }
-
-    //Initialise default value
-    *piInstanceNumber = -1;
-
-    if (ANSC_STATUS_FAILURE == DmlPppMgrGetParamValues(WAN_COMPONENT_NAME, WAN_DBUS_PATH, WAN_NOE_PARAM_NAME, acTmpReturnValue))
-    {
-    CcspTraceError(("%s %d Failed to get param value\n", __FUNCTION__, __LINE__));
-    return ANSC_STATUS_FAILURE;
-    }
-
-    //Total count
-    iTotalNoofEntries = atoi(acTmpReturnValue);
-    CcspTraceInfo(("%s %d - TotalNoofEntries:%d\n", __FUNCTION__, __LINE__, iTotalNoofEntries));
-
-    if (0 >= iTotalNoofEntries)
-    {
-        CcspTraceError(("%s %d: Cannot get number of WanInterface Entry\n", __FUNCTION__, __LINE__));
-        return ANSC_STATUS_FAILURE;
-    }
-
-    //Traverse from loop
-    for (iLoopCount = 0; iLoopCount < iTotalNoofEntries; iLoopCount++)
-    {
-        //Query
-        snprintf(acTmpQueryParam, sizeof(acTmpQueryParam), WAN_PHY_PATH_PARAM_NAME, iLoopCount + 1);
-
-        memset(acTmpReturnValue, 0, sizeof(acTmpReturnValue));
-        if (ANSC_STATUS_FAILURE == DmlPppMgrGetParamValues(WAN_COMPONENT_NAME, WAN_DBUS_PATH, acTmpQueryParam, acTmpReturnValue))
-        {
-            CcspTraceError(("%s %d Failed to get param value\n", __FUNCTION__, __LINE__));
-            continue;
-        }
-
-        //Compare name
-        if (0 == strcmp(acTmpReturnValue, pLowerLayers))
-        {
-            *piInstanceNumber = iLoopCount + 1;
-            break;
-        }
-    }
-
-    return ANSC_STATUS_SUCCESS;
 }
 
 ANSC_STATUS DmlWanmanagerSetParamValues(const char *pComponent, const char *pBus,

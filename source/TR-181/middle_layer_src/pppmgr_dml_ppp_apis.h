@@ -55,6 +55,8 @@
 
 #define UP  "Up"
 #define DOWN  "Down"
+#define PPP_IPCP_STATUS_DOWN    DOWN
+#define PPP_IPV6CP_STATUS_DOWN  DOWN
 #define PHY_IF_MAC_PATH       "/sys/class/net/atm0/address"
 #define DHCPV6_PATH           "/etc/dibbler/%s/"
 #define DHCPV6_DUID_FILE      "client-duid"
@@ -72,7 +74,7 @@
 #define PPP_WAN_VIRTUAL_IFACE_NAME  "Device.X_RDK_WanManager.Interface.%d.VirtualInterface.%d.PPP.Interface"
 #define WAN_NO_OF_VIRTUAL_IFACE_PARAM_NAME    "Device.X_RDK_WanManager.Interface.%d.VirtualInterfaceNumberOfEntries"
 #if defined(WAN_MANAGER_UNIFICATION_ENABLED)
-#define PPP_LCP_STATUS_PARAM_NAME    "Device.X_RDK_WanManager.Interface.%d.VirtualInterface.%d.PPP.LCPStatus"
+#define PPP_LCP_STATUS_PARAM_NAME    "Device.X_RDK_WanManager.Interface.%d.VirtualInterface.%d.PPP.Status"
 #define PPP_LINK_STATUS_PARAM_NAME    "Device.X_RDK_WanManager.Interface.%d.VirtualInterface.%d.PPP.Status"
 #define PPP_IPCP_STATUS_PARAM_NAME    "Device.X_RDK_WanManager.Interface.%d.VirtualInterface.%d.PPP.IPCPStatus"
 #define PPP_IPV6CP_STATUS_PARAM_NAME    "Device.X_RDK_WanManager.Interface.%d.VirtualInterface.%d.PPP.IPv6CPStatus"
@@ -98,12 +100,6 @@
 
 /* DeviceInfo Params */
 #define UP_TIME_PARAM_NAME        "Device.DeviceInfo.UpTime"
-
-#if defined(_COSA_BCM_MIPS_) || defined(_ENABLE_DSL_SUPPORT_)
-#define INTERFACE "erouter0"
-#else
-#define INTERFACE "wan0"
-#endif
 
 typedef enum _eventHandlingAction_
 {
@@ -133,17 +129,9 @@ ANSC_STATUS PppDmlSetIfCfg    ( ANSC_HANDLE hContext, PDML_PPP_IF_CFG pCfg );
 
 ANSC_STATUS PppDmlGetIfStats ( ANSC_HANDLE hContext, ULONG ulPppIfInstanceNumber, PDML_IF_STATS pStats, PDML_PPP_IF_FULL pEntry );
 
-BOOL PppDmlIfEnable( ANSC_HANDLE hContext, ULONG ulInstanceNumber, PDML_PPP_IF_FULL pEntry);
-
 ANSC_STATUS PppDmlIfReset( ULONG ulInstanceNumber);
 
 ULONG PppGetIfAddr( char* netdev );
-
-ANSC_STATUS PPPIfRegAddInfo( ANSC_HANDLE hThisObject, ANSC_HANDLE hContext );
-
-ANSC_STATUS PPPIfRegGetInfo( ANSC_HANDLE hThisObject );
-
-ANSC_STATUS PPPIfRegDelInfo( ANSC_HANDLE hThisObject, ANSC_HANDLE hContext );
 
 ANSC_STATUS  PppMgr_checkPidExist( pid_t pppPid );
 
@@ -153,8 +141,6 @@ ANSC_STATUS PppMgr_stopPppoe(void);
 
 ANSC_STATUS DmlWanmanagerSetParamValues( const char *pComponent, const char *pBus,
         const char *pParamName, const char *pParamVal, enum dataType_e type, unsigned int bCommitFlag );
-
-ANSC_STATUS DmlPppMgrGetWanMgrInstanceNumber(char *pLowerLayers, INT *piInstanceNumber);
 
 static ANSC_STATUS DmlPppMgrGetParamValues(char *pComponent, char *pBus, char *pParamName, char *pReturnVal);
 
@@ -172,7 +158,9 @@ void PppMgr_RemoveDuidFile (char *wanName);
 
 DML_PPP_IF_FULL  * PppMgr_GetIfaceData_locked (UINT pppIfaceInstance);
 
-DML_PPP_IF_FULL  * PppMgr_GetIfaceData_locked (UINT pppIfaceInstance);
+void PppMgr_GetIfaceData_release (DML_PPP_IF_FULL * pPppTable);
 
 ANSC_STATUS PppMgr_StopPppClient (UINT InstanceNumber);
+
+int PppMgr_getIfaceDataWithPid (pid_t pid);
 #endif
