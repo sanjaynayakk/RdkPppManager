@@ -32,42 +32,25 @@
  * limitations under the License.
  */
 
-#include "pppmgr_ssp_global.h"
-#include "pppmgr_dml_plugin_main_apis.h"
+#include "pppmgr_global.h"
+#include "pppmgr_data.h"
 #include "pppmgr_dml.h"
 #include "pppmgr_dml_apis.h"
 #include "pppmgr_dml_ppp_apis.h"
 #include "ccsp_psm_helper.h"
 #include <syscfg/syscfg.h>
-#include <platform_hal.h>
 
 #define PPP_IF_SERVICE_NAME "atm0.0.0.38"
 #define PPP_IF_NAME         "pppoa0"
 #define WAN_IF_NAME         "wan0"
 #define PPPoE_VLAN_IF_NAME  "vlan101"
-#define GET_PPPID_ATTEMPT 5
 
 extern char g_Subsystem[32];
 extern ANSC_HANDLE bus_handle;
 
 extern PBACKEND_MANAGER_OBJECT               g_pBEManager;
-static void* PppMgr_StartPppdDaemon( void *arg );
 
-static int set_syscfg(char *pValue,char *param)
-{
-    if((syscfg_set(NULL, param, pValue) != 0))
-    {
-        return -1;
-    }
-    else
-    {
-        if(syscfg_commit() != 0)
-        {
-            return -1;
-        }
-        return 0;
-    }
-}
+
 
 /***********************************************************************
 
@@ -207,13 +190,6 @@ PPP_GetParamUlongValue
         ULONG*                      puLong
     )
 {
-    /* check the parameter name and return the corresponding value */
-
-    if (AnscEqualString(ParamName, "InterfaceNumberOfEntries", TRUE))
-    {
-        *puLong = PppDmlIfGetNumberOfEntries();
-    }
-
     /* CcspTraceWarning(("Unsupported parameter '%s'\n", ParamName)); */
     return FALSE;
 }
@@ -358,9 +334,8 @@ Interface_GetEntryCount
         ANSC_HANDLE                 hInsContext
     )
 {
-    PDATAMODEL_PPP             pMyObject = (PDATAMODEL_PPP)g_pBEManager->hPPP;
-    
-    return AnscSListQueryDepth(&pMyObject->IfList);
+      ULONG        uiTotalIfaces ;
+      return DmlGetTotalNoOfPPPInterfaces(NULL);
 }
 
 /**********************************************************************  
@@ -402,220 +377,14 @@ Interface_GetEntry
     )
 {
     PDATAMODEL_PPP             pMyObject               = (PDATAMODEL_PPP      )g_pBEManager->hPPP;
-    PSLIST_HEADER                   pListHead               = (PSLIST_HEADER            )&pMyObject->IfList;
-    PPPP_IF_LINK_OBJECT       pContext            = (PPPP_IF_LINK_OBJECT)NULL;
-    PSINGLE_LINK_ENTRY              pSLinkEntry             = (PSINGLE_LINK_ENTRY       )NULL;
-    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL    )NULL;
+    PDML_PPP_IF_FULL           pPppTable                  = (PDML_PPP_IF_FULL    )pMyObject->PppTable;
 
-    pthread_mutex_lock(&pEntry->mDataMutex);
+    pthread_mutex_lock(&pPppTable[nIndex].mDataMutex);
+    pPppTable[nIndex].Cfg.InstanceNumber = nIndex + 1;
+    *pInsNumber = nIndex + 1;
+    pthread_mutex_unlock(&pPppTable[nIndex].mDataMutex);
 
-    pSLinkEntry = AnscSListGetEntryByIndex(&pMyObject->IfList, nIndex);
-
-    if ( pSLinkEntry )
-    {
-        pContext = ACCESS_PPP_IF_LINK_OBJECT(pSLinkEntry);
-
-        *pInsNumber = pContext->InstanceNumber;
-
-        pEntry = pContext->hContext;
-        
-        PppDmlGetIfCfg(NULL, &pEntry->Cfg);
-    }
-    pthread_mutex_unlock(&pEntry->mDataMutex);
-
-    return pContext;
-}
-
-/**********************************************************************  
-
-    caller:     owner of this object 
-
-    prototype: 
-
-        ANSC_HANDLE
-        Interface_AddEntry
-            (
-                ANSC_HANDLE                 hInsContext,
-                ULONG*                      pInsNumber
-            );
-
-    description:
-
-        This function is called to add a new entry.
-
-    argument:   ANSC_HANDLE                 hInsContext,
-                The instance handle;
-
-                ULONG*                      pInsNumber
-                The output instance number;
-
-    return:     The handle of new added entry.
-
-**********************************************************************/
-ANSC_HANDLE
-Interface_AddEntry
-    (
-        ANSC_HANDLE                 hInsContext,
-        ULONG*                      pInsNumber
-    )
-{
-    PDATAMODEL_PPP             pMyObject               = (PDATAMODEL_PPP      )g_pBEManager->hPPP;
-    PSLIST_HEADER                   pListHead               = (PSLIST_HEADER            )&pMyObject->IfList;
-    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL    )NULL;
-    PPPP_IF_LINK_OBJECT       pLinkContext            = (PPPP_IF_LINK_OBJECT)NULL;
-
-#ifdef _COSA_DRG_CNS_
-    return NULL;
-#endif
-
-    pEntry = (PDML_PPP_IF_FULL)AnscAllocateMemory(sizeof(DML_PPP_IF_FULL));
-
-    if (!pEntry)
-    {
-        return NULL;
-    }
-    pthread_mutex_lock(&pEntry->mDataMutex);    
-
-    memset(pEntry, 0, sizeof(PDML_PPP_IF_FULL));
-
-    sprintf(pEntry->Cfg.Alias, "erouter%d", pMyObject->ulIfNextInstance);
-
-    strncpy(pEntry->Info.InterfaceServiceName, PPP_IF_SERVICE_NAME,sizeof(pEntry->Info.InterfaceServiceName));
-
-    strncpy(pEntry->Info.Name, PPP_IF_NAME,sizeof(pEntry->Info.Name));
-
-    pEntry->Info.AuthenticationProtocol = DML_PPP_AUTH_CHAP;
-
-    if (pthread_mutex_init(&pEntry->mDataMutex, NULL) != 0)
-    { 
-        AnscFreeMemory(pEntry);
-
-        pthread_mutex_unlock(&pEntry->mDataMutex);
-
-        return NULL;
-    } 
-    /* Update the cache */
-    pLinkContext = (PPPP_IF_LINK_OBJECT)AnscAllocateMemory(sizeof(PPP_IF_LINK_OBJECT));
-    if (!pLinkContext)
-    {
-        AnscFreeMemory(pEntry);
-
-        pthread_mutex_unlock(&pEntry->mDataMutex);
-
-        return NULL;
-    }
-
-    pLinkContext->InstanceNumber = pEntry->Cfg.InstanceNumber = pMyObject->ulIfNextInstance;
-
-    pMyObject->ulIfNextInstance++;
-
-    if ( pMyObject->ulIfNextInstance == 0 )
-    {
-        pMyObject->ulIfNextInstance = 1;
-    }
-
-    pLinkContext->hContext        = (ANSC_HANDLE)pEntry;
-    pLinkContext->hParentTable    = NULL;
-    pLinkContext->bNew            = TRUE;
-
-
-    PppSListPushEntryByInsNum(pListHead, pLinkContext);
-
-
-    PPPIfRegAddInfo((ANSC_HANDLE)pMyObject, (ANSC_HANDLE)pLinkContext);
-
-    *pInsNumber = pLinkContext->InstanceNumber;
-
-    pthread_mutex_unlock(&pEntry->mDataMutex);
-
-    return pLinkContext;
-}
-
-/**********************************************************************  
-
-    caller:     owner of this object 
-
-    prototype: 
-
-        ULONG
-        Interface_DelEntry
-            (
-                ANSC_HANDLE                 hInsContext,
-                ANSC_HANDLE                 hInstance
-            );
-
-    description:
-
-        This function is called to delete an exist entry.
-
-    argument:   ANSC_HANDLE                 hInsContext,
-                The instance handle;
-
-                ANSC_HANDLE                 hInstance
-                The exist entry handle;
-
-    return:     The status of the operation.
-
-**********************************************************************/
-ULONG
-Interface_DelEntry
-    (
-        ANSC_HANDLE                 hInsContext,
-        ANSC_HANDLE                 hInstance
-    )
-{
-    PPPP_IF_LINK_OBJECT       pLinkContext            = (PPPP_IF_LINK_OBJECT)hInstance;
-    PPPP_IF_LINK_OBJECT       pLinkContext2           = (PPPP_IF_LINK_OBJECT)NULL;
-    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL    )pLinkContext->hContext;
-    PDML_PPP_IF_FULL           pNewEntry               = (PDML_PPP_IF_FULL    )NULL;
-    PDATAMODEL_PPP             pMyObject               = (PDATAMODEL_PPP      )g_pBEManager->hPPP;
-    PSLIST_HEADER                   pListHead               = (PSLIST_HEADER            )&pMyObject->IfList;
-    PSINGLE_LINK_ENTRY              pSLinkEntry             = NULL;
-
-#ifdef _COSA_DRG_CNS_
-    return ANSC_STATUS_FAILURE;
-#endif
-
-    if(pEntry == NULL)
-    {
-        return ANSC_STATUS_FAILURE;
-    }
-
-    pthread_mutex_lock(&pEntry->mDataMutex);
-
-    PppDmlDelIfEntry(NULL, pEntry->Cfg.InstanceNumber);
-
-    /* Update the cache */
-    if ( TRUE )
-    {
-        pSLinkEntry = AnscSListGetFirstEntry(&pMyObject->IfList);
-
-        while ( pSLinkEntry )
-        {
-            pLinkContext2 = ACCESS_PPP_IF_LINK_OBJECT(pSLinkEntry);
-            pSLinkEntry   = AnscSListGetNextEntry(pSLinkEntry);
-
-            pNewEntry = (PDML_PPP_IF_FULL)pLinkContext2->hContext;
-
-            if ( pNewEntry && AnscEqualString(pNewEntry->Cfg.Alias, pEntry->Cfg.Alias, FALSE))
-            {
-                AnscSListPopEntryByLink(pListHead, &pLinkContext2->Linkage);
-
-				if (pLinkContext->bNew)
-	                PPPIfRegDelInfo((ANSC_HANDLE)pMyObject, (ANSC_HANDLE)pLinkContext2);
-
-                AnscFreeMemory(pNewEntry);
-                AnscFreeMemory(pLinkContext2);
-
-                break;
-            }
-        }
-    }
-    pthread_mutex_unlock(&pEntry->mDataMutex);
-
-    pthread_mutex_destroy(&pEntry->mDataMutex);
-        
-    return ANSC_STATUS_SUCCESS;
+    return &(pPppTable[nIndex]);
 }
 
 /**********************************************************************  
@@ -656,8 +425,8 @@ Interface_GetParamBoolValue
         BOOL*                       pBool
     )
 {
-    PPPP_IF_LINK_OBJECT       pContextLinkObject      = (PPPP_IF_LINK_OBJECT)hInsContext;
-    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)pContextLinkObject->hContext;
+    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)hInsContext;
+
     BOOL retStatus = FALSE;
 
     pthread_mutex_lock(&pEntry->mDataMutex);
@@ -737,8 +506,8 @@ Interface_GetParamUlongValue
         ULONG*                      puLong
     )
 {
-    PPPP_IF_LINK_OBJECT       pContextLinkObject      = (PPPP_IF_LINK_OBJECT)hInsContext;
-    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)pContextLinkObject->hContext;
+    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)hInsContext;
+
     BOOL retStatus = FALSE;
     char buff[10] = {0};
 
@@ -747,7 +516,7 @@ Interface_GetParamUlongValue
     if( AnscEqualString(ParamName, "Status", TRUE))
     {
         /* collect value */
-        PPPDmlGetIfInfo(pContextLinkObject->hContext, pEntry->Cfg.InstanceNumber, &pEntry->Info);
+        PPPDmlGetIfInfo(hInsContext, pEntry->Cfg.InstanceNumber, &pEntry->Info);
 
         *puLong = pEntry->Info.Status;
 
@@ -757,7 +526,7 @@ Interface_GetParamUlongValue
     if( AnscEqualString(ParamName, "LastChange", TRUE))
     {
         /* collect value */
-        PPPDmlGetIfInfo(pContextLinkObject->hContext, pEntry->Cfg.InstanceNumber, &pEntry->Info);
+        PPPDmlGetIfInfo(hInsContext, pEntry->Cfg.InstanceNumber, &pEntry->Info);
 
         *puLong = AnscGetTimeIntervalInSeconds(pEntry->Info.LastChange, GetUptimeinSeconds());
 
@@ -767,7 +536,7 @@ Interface_GetParamUlongValue
     if( AnscEqualString(ParamName, "ConnectionStatus", TRUE))
     {
         /* collect value */
-        PPPDmlGetIfInfo(pContextLinkObject->hContext, pEntry->Cfg.InstanceNumber, &pEntry->Info);
+        PPPDmlGetIfInfo(hInsContext, pEntry->Cfg.InstanceNumber, &pEntry->Info);
 
         *puLong = pEntry->Info.ConnectionStatus;
 
@@ -793,7 +562,7 @@ Interface_GetParamUlongValue
     if( AnscEqualString(ParamName, "LastConnectionError", TRUE))
     {
         /* collect value */
-        PPPDmlGetIfInfo(pContextLinkObject->hContext, pEntry->Cfg.InstanceNumber, &pEntry->Info);
+        PPPDmlGetIfInfo(hInsContext, pEntry->Cfg.InstanceNumber, &pEntry->Info);
 
         *puLong = pEntry->Info.LastConnectionError;
 
@@ -827,7 +596,7 @@ Interface_GetParamUlongValue
     if( AnscEqualString(ParamName, "EncryptionProtocol", TRUE))
     {
         /* collect value */
-        PPPDmlGetIfInfo(pContextLinkObject->hContext, pEntry->Cfg.InstanceNumber, &pEntry->Info);
+        PPPDmlGetIfInfo(hInsContext, pEntry->Cfg.InstanceNumber, &pEntry->Info);
 
         *puLong = pEntry->Info.EncryptionProtocol;
 
@@ -837,7 +606,7 @@ Interface_GetParamUlongValue
     if( AnscEqualString(ParamName, "CompressionProtocol", TRUE))
     {
         /* collect value */
-        PPPDmlGetIfInfo(pContextLinkObject->hContext, pEntry->Cfg.InstanceNumber, &pEntry->Info);
+        PPPDmlGetIfInfo(hInsContext, pEntry->Cfg.InstanceNumber, &pEntry->Info);
 
         *puLong = pEntry->Info.CompressionProtocol;
 
@@ -847,7 +616,7 @@ Interface_GetParamUlongValue
     if( AnscEqualString(ParamName, "AuthenticationProtocol", TRUE))
     {
         /* collect value */
-        PPPDmlGetIfInfo(pContextLinkObject->hContext, pEntry->Cfg.InstanceNumber, &pEntry->Info);
+        PPPDmlGetIfInfo(hInsContext, pEntry->Cfg.InstanceNumber, &pEntry->Info);
 
         *puLong = pEntry->Info.AuthenticationProtocol;
 
@@ -867,8 +636,7 @@ Interface_GetParamUlongValue
     if( AnscEqualString(ParamName, "CurrentMRUSize", TRUE))
     {
         /* collect value */
-        PPPDmlGetIfInfo(pContextLinkObject->hContext, pEntry->Cfg.InstanceNumber, &pEntry->Info);
-
+        PPPDmlGetIfInfo(hInsContext, pEntry->Cfg.InstanceNumber, &pEntry->Info);
         pEntry->Info.CurrentMRUSize = pEntry->Cfg.MaxMRUSize;
         *puLong = pEntry->Info.CurrentMRUSize;
 
@@ -886,7 +654,7 @@ Interface_GetParamUlongValue
     if( AnscEqualString(ParamName, "LCPEcho", TRUE))
     {
         /* collect value */
-        PPPDmlGetIfInfo(pContextLinkObject->hContext, pEntry->Cfg.InstanceNumber, &pEntry->Info);
+        PPPDmlGetIfInfo(hInsContext, pEntry->Cfg.InstanceNumber, &pEntry->Info);
 
         *puLong = pEntry->Info.LCPEcho;
 
@@ -896,7 +664,7 @@ Interface_GetParamUlongValue
     if( AnscEqualString(ParamName, "LCPEchoRetry", TRUE))
     {
         /* collect value */
-        PPPDmlGetIfInfo(pContextLinkObject->hContext, pEntry->Cfg.InstanceNumber, &pEntry->Info);
+        PPPDmlGetIfInfo(hInsContext, pEntry->Cfg.InstanceNumber, &pEntry->Info);
 
         *puLong = pEntry->Info.LCPEchoRetry;
 
@@ -906,7 +674,7 @@ Interface_GetParamUlongValue
     if( AnscEqualString(ParamName, "X_RDK_LinkType", TRUE))
     {
         /* collect value */
-        PPPDmlGetIfInfo(pContextLinkObject->hContext, pEntry->Cfg.InstanceNumber, &pEntry->Info);
+        PPPDmlGetIfInfo(hInsContext, pEntry->Cfg.InstanceNumber, &pEntry->Info);
 
         *puLong = pEntry->Cfg.LinkType;
 
@@ -965,8 +733,7 @@ Interface_GetParamStringValue
         ULONG*                      pUlSize
     )
 {
-    PPPP_IF_LINK_OBJECT       pContextLinkObject      = (PPPP_IF_LINK_OBJECT)hInsContext;
-    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)pContextLinkObject->hContext;
+    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)hInsContext;
     PUCHAR                          pString                 = NULL;
     uint32_t retStatus = -1;
 
@@ -984,7 +751,7 @@ Interface_GetParamStringValue
     if( AnscEqualString(ParamName, "Name", TRUE))
     {
         /* collect value */
-        PPPDmlGetIfInfo(pContextLinkObject->hContext, pEntry->Cfg.InstanceNumber, &pEntry->Info);
+        PPPDmlGetIfInfo(hInsContext, pEntry->Cfg.InstanceNumber, &pEntry->Info);
 
         AnscCopyString(pValue, pEntry->Info.Name);
 
@@ -1001,14 +768,6 @@ Interface_GetParamStringValue
 
     if( AnscEqualString(ParamName, "Username", TRUE))
     {
-        if ( strcmp(pEntry->Cfg.Username, "") == 0 )
-        {
-            if( RETURN_ERR == platform_hal_GetPppUserName(pEntry->Cfg.Username, sizeof(pEntry->Cfg.Username)) )
-            {
-                CcspTraceError(("%s %d - Failed to read ppp username from persistent storage\n", __FUNCTION__, __LINE__));
-            }
-        }
-
 		 /* collect value */
         AnscCopyString(pValue, pEntry->Cfg.Username);
 
@@ -1017,13 +776,6 @@ Interface_GetParamStringValue
 
     if( AnscEqualString(ParamName, "Password", TRUE))
     {
-        if ( strcmp(pEntry->Cfg.Password, "") == 0 )
-        {
-            if( RETURN_ERR == platform_hal_GetPppPassword(pEntry->Cfg.Password, sizeof(pEntry->Cfg.Password)) )
-            {
-                CcspTraceError(("%s %d - Failed to read ppp password from persistent storage\n", __FUNCTION__, __LINE__));
-            }
-	}
 		/* collect value */
         AnscCopyString(pValue, "");
 
@@ -1073,8 +825,7 @@ Interface_SetParamBoolValue
         BOOL                        bValue
     )
 {
-    PPPP_IF_LINK_OBJECT       pContextLinkObject      = (PPPP_IF_LINK_OBJECT)hInsContext;
-    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)pContextLinkObject->hContext;
+    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)hInsContext;
 
     char command[1024] = { 0 };
     char config_command[1024] = { 0 };
@@ -1095,157 +846,7 @@ Interface_SetParamBoolValue
     if( AnscEqualString(ParamName, "Enable", TRUE))
     {
         /* save update to backup */
-        pEntry->Cfg.bEnabled = bValue;
-        if( bValue == true )
-        {
-            if(ANSC_STATUS_SUCCESS == PppMgr_checkPidExist(pEntry->Info.pppPid))
-            {
-                CcspTraceInfo(("pppd is already running \n"));
-
-                pthread_mutex_unlock(&pEntry->mDataMutex);
-
-                return TRUE;
-            }
-
-            pEntry->Info.pppPid = 0;
-
-            if ( (strcmp(pEntry->Cfg.Username,"") == 0) && (strcmp(pEntry->Cfg.Password,"") == 0) )
-            {
-                int ret = platform_hal_GetPppUserName(pEntry->Cfg.Username, sizeof(pEntry->Cfg.Username));
-                if( ret != 0 )
-               {
-                    CcspTraceError(("%s %d - Failed to read ppp username from persistent storage %d\n",
-                    __FUNCTION__, __LINE__, ret ));
-                    return FALSE;
-                }
-
-                ret = platform_hal_GetPppPassword(pEntry->Cfg.Password, sizeof(pEntry->Cfg.Password));
-                if( ret != 0 )
-                {
-                    CcspTraceError(("%s %d - Failed to read ppp pasword from persistent storage %d\n",
-                    __FUNCTION__, __LINE__, ret ));
-                    return FALSE;
-                }
-            }
-
-            if((strcmp(pEntry->Info.Name,"") != 0) && (strcmp(pEntry->Info.InterfaceServiceName,"") != 0) &&
-                    (strcmp(pEntry->Cfg.Username,"") != 0) && (strcmp(pEntry->Cfg.Password,"") != 0) &&
-                    (pEntry->Info.AuthenticationProtocol > 0))
-            {
-                if((pEntry->Info.AuthenticationProtocol == DML_PPP_AUTH_CHAP) ||
-                        (pEntry->Info.AuthenticationProtocol ==  DML_PPP_AUTH_PAP))
-                {
-                    sprintf(auth_proto,"0");
-                }
-                else
-                {
-                    /* support for mschap */
-                    sprintf(auth_proto,"4");
-                }
-                if (pEntry->Cfg.LinkType == DML_PPPoA_LINK_TYPE)
-                {
-            #ifdef USE_PPP_DAEMON
-                    snprintf(command, sizeof(command), "pppd -6 -c %s -a %s -u %s -p %s -f %s &",
-                        pEntry->Cfg.Alias, pEntry->Info.InterfaceServiceName, pEntry->Cfg.Username,
-                        pEntry->Cfg.Password, auth_proto);
-            #else
-                    /* Assume a default rp-pppoe config exist. Update rp-pppoe configuration */
-                    snprintf(config_command, sizeof(config_command), "pppoe_config.sh %s %s %s %s PPPoA", 
-                        pEntry->Cfg.Username, pEntry->Cfg.Password, pEntry->Info.InterfaceServiceName, pEntry->Cfg.Alias);
-
-                    system(config_command);
-
-                    /* start rp-pppoe */
-                    snprintf(command, sizeof(command), "/usr/sbin/pppoe-start");
-            #endif
-                
-                }
-                else if (pEntry->Cfg.LinkType == DML_PPPoE_LINK_TYPE)
-                {
-            #ifdef USE_PPP_DAEMON
-                    snprintf(command, sizeof(command), "pppd -6 -c %s -i %s -u %s -p %s -f %s &",
-                        pEntry->Cfg.Alias, PPPoE_VLAN_IF_NAME, pEntry->Cfg.Username, pEntry->Cfg.Password, auth_proto);
-            #else
-                    /* Assume a defule rp-pppoe config exist. Update rp-pppoe configuration */
-                    snprintf(config_command, sizeof(config_command), "pppoe_config.sh %s %s %s %s PPPoE", 
-                        pEntry->Cfg.Username, pEntry->Cfg.Password, PPPoE_VLAN_IF_NAME, pEntry->Cfg.Alias);
-
-                    system(config_command);
-
-                    /* start rp-pppoe */
-                    snprintf(command, sizeof(command), "/usr/sbin/pppoe-start");
-            #endif
-                }
-                CcspTraceInfo(("parameters were set\n"));
-            }
-            else
-            {
-                pthread_mutex_unlock(&pEntry->mDataMutex);
-
-                return FALSE;
-            }
-            CcspTraceInfo(("command to execute is  '%s'\n", command));
-
-            pthread_mutex_unlock(&pEntry->mDataMutex);
-            //system(command);
-            int iErrorCode = pthread_create( &pppdThreadId, NULL, &PppMgr_StartPppdDaemon, (void*) command );
-            if( 0 != iErrorCode )
-            {
-                CcspTraceInfo(("%s %d - Failed to start Pppmgr_StartPppdDaemon  %d\n", __FUNCTION__, __LINE__,
-                            iErrorCode ));
-
-                return FALSE;
-            }
-            /* lock while updating pid */
-            pthread_mutex_lock(&pEntry->mDataMutex);
-
-            do 
-            {
-                if(getAttempts)
-                {
-                    //wait for 1 second
-                    sleep(1);
-                }
-                pEntry->Info.pppPid = PppMgr_getPppPid();
-
-                getAttempts++;
-
-            }while(pEntry->Info.pppPid <= 0 && getAttempts < GET_PPPID_ATTEMPT);
-            
-            CcspTraceInfo(("pid got in attempt  '%d'\n", getAttempts));
-
-            DmlPppMgrGetWanMgrInstanceNumber(pEntry->Cfg.LowerLayers, &(pEntry->Cfg.WanInstanceNumber));
-
-            CcspTraceInfo(("pid table value  '%d'\n", pEntry->Info.pppPid));
-        }
-        else
-        {
-
-        // This is the section where we are stopping ppp daemon when a teardown case occurs
-        // Eg: Unplugging adsl line
-#ifdef USE_PPP_DAEMON
-            PppMgr_stopPppProcess(pEntry->Info.pppPid);
-#else
-            CcspTraceInfo(("%s %d - Stopping ppp client\n", __FUNCTION__, __LINE__));
-	    system("/usr/sbin/pppoe-stop");
-            // instead of waiting for a fixed time period, check if ppp daemon is terminated or not
-            // wait for maximim 10 seconds in case the pppPid still exist in system
-            while(ANSC_STATUS_SUCCESS == PppMgr_checkPidExist(pEntry->Info.pppPid))
-            {
-                CcspTraceInfo(("%s %d - Waiting for pppd to terminate\n", __FUNCTION__, __LINE__, pEntry->Info.pppPid));
-                sleep(1);
-                waitTime++;
-                if(waitTime >= 10)
-                    break;
-            }
-#endif
-            // At this point ppp daemon is terminated
-            CcspTraceInfo(("%s %d - pppd has been terminated\n", __FUNCTION__, __LINE__));
-            pEntry->Info.pppPid = 0;
-        }
-
-        /* we are unlocking at end */
-        retStatus = TRUE;
+        retStatus = PppMgr_EnableIf(pEntry->Cfg.InstanceNumber, bValue);
     }
 
     if( AnscEqualString(ParamName, "IPCPEnable", TRUE))
@@ -1269,44 +870,18 @@ Interface_SetParamBoolValue
         /* save update to backup */
         if ( pEntry->Cfg.bEnabled && bValue )
         {
-            PppDmlIfReset(NULL, pEntry->Cfg.InstanceNumber);
+            retStatus = PppDmlIfReset(pEntry->Cfg.InstanceNumber);
         }
-
-        retStatus = TRUE;
+        else
+        {
+            retStatus = FALSE;
+        }
     }
 
     pthread_mutex_unlock(&pEntry->mDataMutex);
 
     return retStatus;
 
-}
-
-static void* PppMgr_StartPppdDaemon( void *arg )
-{
-    FILE *pf;
-    const char *pCommand = (char *) arg;
-
-    pthread_detach(pthread_self());
-
-    if( NULL == pCommand )
-    {
-        CcspTraceError(("%s Invalid Memory\n", __FUNCTION__));
-        return ANSC_STATUS_FAILURE;
-    }
-
-    pf = popen(pCommand, "r");
-    if(!pf)
-    {
-        fprintf(stderr, "Could not open pipe for output.\n");
-        return;
-    }
-
-    if (pclose(pf) != 0)
-    {
-        fprintf(stderr," Error: Failed to close command stream \n");
-    }
-
-    return NULL;
 }
 
 /**********************************************************************  
@@ -1391,10 +966,10 @@ Interface_SetParamUlongValue
         ULONG                       uValue
     )
 {
-    PPPP_IF_LINK_OBJECT       pContextLinkObject      = (PPPP_IF_LINK_OBJECT)hInsContext;
-    PDML_PPP_IF_FULL          pEntry                  = (PDML_PPP_IF_FULL)pContextLinkObject->hContext;
+    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)hInsContext;
+
     BOOL retStatus = FALSE;
-    char buf[10] = {0};
+    char buf[128] = {0};
 
     if(pEntry == NULL)
     {
@@ -1408,7 +983,8 @@ Interface_SetParamUlongValue
     {
         /* save update to backup */
         pEntry->Cfg.AutoDisconnectTime = uValue;
-
+        snprintf(buf, sizeof(buf), "sleep %d && pppoe-stop &",pEntry->Cfg.AutoDisconnectTime);
+        system(buf);
         retStatus = TRUE;
     }
 
@@ -1511,11 +1087,10 @@ Interface_SetParamStringValue
         char*                       pString
     )
 {
-    PPPP_IF_LINK_OBJECT       pContextLinkObject      = (PPPP_IF_LINK_OBJECT)hInsContext;
-    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)pContextLinkObject->hContext;
+    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)hInsContext;
 
-    int instancenum = 1;
     BOOL retStatus = FALSE;
+    int ret = 0;
 
     if(pEntry == NULL)
     {
@@ -1543,36 +1118,33 @@ Interface_SetParamStringValue
 
     if( AnscEqualString(ParamName, "Username", TRUE))
     {
-        instancenum = pEntry->Cfg.InstanceNumber;
-
-        if(RETURN_ERR == platform_hal_SetPppUserName(pString, PPP_CREDS_MAX_LEN))
+        if(strcmp(pString,"") != 0)
         {
-            CcspTraceError(("platform_hal_SetPppUserName failed\n"));
-            retStatus = FALSE;
-        } else
-        {
-            AnscCopyString(pEntry->Cfg.Username, pString);
-            retStatus = TRUE;
+            ret = validateUsername(pString);
+            if (ret !=0)
+            {
+                retStatus = FALSE;
+            }
+            else
+            {
+                AnscCopyString(pEntry->Cfg.Username, pString);
+                retStatus = TRUE;
+            }
         }
     }
 
     if( AnscEqualString(ParamName, "Password", TRUE))
     {
-        instancenum = pEntry->Cfg.InstanceNumber;
-
-        if(RETURN_ERR == platform_hal_SetPppPassword(pString, PPP_CREDS_MAX_LEN))
-        {
-            CcspTraceError(("platform_hal_SetPppPassword failed\n"));
-            retStatus = FALSE;
-        } else
+        if(strcmp(pString,"") != 0)
         {
             AnscCopyString(pEntry->Cfg.Password, pString);
+
             retStatus = TRUE;
         }
     }
 
     pthread_mutex_unlock(&pEntry->mDataMutex);
-    
+
     return retStatus;
 
 }
@@ -1615,42 +1187,29 @@ Interface_Validate
         ULONG*                      puLength
     )
 {
+
     PDATAMODEL_PPP             pMyObject         = (PDATAMODEL_PPP      )g_pBEManager->hPPP;
-    PSLIST_HEADER                   pListHead         = (PSLIST_HEADER            )&pMyObject->IfList;
-    PPPP_IF_LINK_OBJECT       pLinkContext      = (PPPP_IF_LINK_OBJECT)hInsContext;
-    PDML_PPP_IF_FULL           pEntry            = (PDML_PPP_IF_FULL    )pLinkContext->hContext;
-    PPPP_IF_LINK_OBJECT       pLinkContext2     = (PPPP_IF_LINK_OBJECT)NULL;
-    PDML_PPP_IF_FULL           pEntry2           = (PDML_PPP_IF_FULL    )NULL;
-    PSINGLE_LINK_ENTRY              pSLinkEntry       = (PSINGLE_LINK_ENTRY       )NULL;
+    PDML_PPP_IF_FULL           pEntry            = (PDML_PPP_IF_FULL    )hInsContext;
+    ULONG                      ulIndex                 = 0;
+    ULONG                      ulEntryCount;
 
-    pSLinkEntry = AnscSListGetFirstEntry(pListHead);
 
-    pthread_mutex_lock(&pEntry->mDataMutex);
+    ulEntryCount = DmlGetTotalNoOfPPPInterfaces(NULL);
 
-    while ( pSLinkEntry )
+    for ( ulIndex = 0; ulIndex < ulEntryCount; ulIndex++ )
     {
-        pLinkContext2 = ACCESS_PPP_IF_LINK_OBJECT(pSLinkEntry);
-        pSLinkEntry   = AnscSListGetNextEntry(pSLinkEntry);
-
-        pEntry2       = (PDML_PPP_IF_FULL)pLinkContext2->hContext;
-
         if ( 
-                 pEntry2 && 
-                 ((ULONG)pEntry2 != (ULONG)pEntry) && 
-                 AnscEqualString(pEntry->Cfg.Alias, pEntry2->Cfg.Alias, TRUE) 
+                ((ULONG)pEntry != (ULONG)&pMyObject->PppTable[ulIndex]) &&
+                AnscEqualString(pEntry->Info.Name, pMyObject->PppTable[ulIndex].Info.Name, TRUE)
            )
         {
-            AnscCopyString(pReturnParamName, "Alias");
+            AnscCopyString(pReturnParamName, "Name");
 
-            *puLength = AnscSizeOfString("Aliias");
-
-            pthread_mutex_unlock(&pEntry->mDataMutex);
+            *puLength = AnscSizeOfString("Name");
             
             return FALSE;
         }
     }
-
-    pthread_mutex_unlock(&pEntry->mDataMutex);    
 
     return TRUE;
 }
@@ -1684,22 +1243,10 @@ Interface_Commit
     )
 {
     PDATAMODEL_PPP             pMyObject               = (PDATAMODEL_PPP      )g_pBEManager->hPPP;
-    PPPP_IF_LINK_OBJECT       pContextLinkObject      = (PPPP_IF_LINK_OBJECT)hInsContext;
-    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL    )pContextLinkObject->hContext;
 
+    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL    )hInsContext;
     pthread_mutex_lock(&pEntry->mDataMutex);
-
-    if ( pContextLinkObject->bNew )
-    {
-        pContextLinkObject->bNew = FALSE;
-
-        PppDmlAddIfEntry(NULL, pEntry);
-        PPPIfRegDelInfo((ANSC_HANDLE)pMyObject, (ANSC_HANDLE)pContextLinkObject);
-    }
-    else
-    {
         PppDmlSetIfCfg(NULL, &pEntry->Cfg);
-    }
     pthread_mutex_unlock(&pEntry->mDataMutex);    
 
     return 0;
@@ -1734,8 +1281,7 @@ Interface_Rollback
         ANSC_HANDLE                 hInsContext
     )
 {
-    PPPP_IF_LINK_OBJECT       pContextLinkObject      = (PPPP_IF_LINK_OBJECT)hInsContext;
-    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)pContextLinkObject->hContext;
+    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)hInsContext;
     
     pthread_mutex_lock(&pEntry->mDataMutex);
 
@@ -1891,8 +1437,8 @@ PPPoE_GetParamUlongValue
         ULONG*                      puLong
     )
 {
-    PPPP_IF_LINK_OBJECT       pContextLinkObject      = (PPPP_IF_LINK_OBJECT)hInsContext;
-    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)pContextLinkObject->hContext;
+    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)hInsContext;
+
     BOOL retStatus = FALSE;
 
     pthread_mutex_lock(&pEntry->mDataMutex);
@@ -1900,7 +1446,7 @@ PPPoE_GetParamUlongValue
     if( AnscEqualString(ParamName, "SessionID", TRUE))
     {
         /* collect value */
-        PPPDmlGetIfInfo(pContextLinkObject->hContext, pEntry->Cfg.InstanceNumber, &pEntry->Info);
+        PPPDmlGetIfInfo(hInsContext, pEntry->Cfg.InstanceNumber, &pEntry->Info);
 
         *puLong = pEntry->Info.SessionID;
 
@@ -1959,8 +1505,8 @@ PPPoE_GetParamStringValue
         ULONG*                      pUlSize
     )
 {
-    PPPP_IF_LINK_OBJECT       pContextLinkObject      = (PPPP_IF_LINK_OBJECT)hInsContext;
-    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)pContextLinkObject->hContext;
+    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)hInsContext;
+
     uint32_t retSuccess = 0;
 
     pthread_mutex_lock(&pEntry->mDataMutex);
@@ -2152,8 +1698,8 @@ PPPoE_SetParamStringValue
         char*                       pString
     )
 {
-    PPPP_IF_LINK_OBJECT       pContextLinkObject      = (PPPP_IF_LINK_OBJECT)hInsContext;
-    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)pContextLinkObject->hContext;
+    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)hInsContext;
+
     BOOL retStatus = FALSE;
 
     pthread_mutex_lock(&pEntry->mDataMutex);
@@ -2249,24 +1795,12 @@ PPPoE_Commit
     )
 {
     PDATAMODEL_PPP             pMyObject               = (PDATAMODEL_PPP      )g_pBEManager->hPPP;
-    PPPP_IF_LINK_OBJECT       pContextLinkObject      = (PPPP_IF_LINK_OBJECT)hInsContext;
-    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL    )pContextLinkObject->hContext;
+    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL    )hInsContext;
 
     pthread_mutex_lock(&pEntry->mDataMutex);
-
-    if ( pContextLinkObject->bNew )
-    {
-        pContextLinkObject->bNew = FALSE;
-
-        PppDmlAddIfEntry(NULL, pEntry);
-        PPPIfRegDelInfo((ANSC_HANDLE)pMyObject, (ANSC_HANDLE)pContextLinkObject);
-    }
-    else
-    {
         PppDmlSetIfCfg(NULL, &pEntry->Cfg);
-    }
+    pthread_mutex_unlock(&pEntry->mDataMutex);
    
-    pthread_mutex_unlock(&pEntry->mDataMutex); 
     return 0;
 }
 
@@ -2299,8 +1833,7 @@ PPPoE_Rollback
         ANSC_HANDLE                 hInsContext
     )
 {
-    PPPP_IF_LINK_OBJECT       pContextLinkObject      = (PPPP_IF_LINK_OBJECT)hInsContext;
-    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)pContextLinkObject->hContext;
+    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)hInsContext;
 
     pthread_mutex_lock(&pEntry->mDataMutex);
 
@@ -2368,8 +1901,7 @@ IPCP_GetParamBoolValue
         BOOL*                       pBool
     )
 {
-    PPPP_IF_LINK_OBJECT       pContextLinkObject      = (PPPP_IF_LINK_OBJECT)hInsContext;
-    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)pContextLinkObject->hContext;
+    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)hInsContext;
 
     pthread_mutex_lock(&pEntry->mDataMutex);
     /* check the parameter name and return the corresponding value */
@@ -2522,13 +2054,13 @@ IPCP_GetParamStringValue
         ULONG*                      pUlSize
     )
 {
-    PPPP_IF_LINK_OBJECT       pContextLinkObject      = (PPPP_IF_LINK_OBJECT)hInsContext;
-    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)pContextLinkObject->hContext;
+    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)hInsContext;
+
     uint32_t retStatus = -1;
 
     pthread_mutex_lock(&pEntry->mDataMutex);
 
-    PPPDmlGetIfInfo(pContextLinkObject->hContext, pEntry->Cfg.InstanceNumber, &pEntry->Info);
+    PPPDmlGetIfInfo(hInsContext, pEntry->Cfg.InstanceNumber, &pEntry->Info);
     /* check the parameter name and return the corresponding value */
     if( AnscEqualString(ParamName, "LocalIPAddress", TRUE))
     {
@@ -2632,8 +2164,7 @@ IPCP_SetParamBoolValue
         BOOL                        bValue
     )
 {
-    PPPP_IF_LINK_OBJECT       pContextLinkObject      = (PPPP_IF_LINK_OBJECT)hInsContext;
-    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)pContextLinkObject->hContext;
+    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)hInsContext;
 
     BOOL retStatus = FALSE;
 
@@ -2783,8 +2314,8 @@ IPCP_SetParamStringValue
         char*                       pString
     )
 {
-    PPPP_IF_LINK_OBJECT       pContextLinkObject      = (PPPP_IF_LINK_OBJECT)hInsContext;
-    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)pContextLinkObject->hContext;
+    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)hInsContext;
+ 
     BOOL retStatus = FALSE;
 
     if(pEntry == NULL)
@@ -2883,22 +2414,12 @@ IPCP_Commit
     )
 {
     PDATAMODEL_PPP             pMyObject               = (PDATAMODEL_PPP      )g_pBEManager->hPPP;
-    PPPP_IF_LINK_OBJECT       pContextLinkObject      = (PPPP_IF_LINK_OBJECT)hInsContext;
-    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL    )pContextLinkObject->hContext;
+    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL    )hInsContext;
 
     pthread_mutex_lock(&pEntry->mDataMutex);
 
-    if ( pContextLinkObject->bNew )
-    {
-        pContextLinkObject->bNew = FALSE;
+    PppDmlSetIfCfg(NULL, &pEntry->Cfg);
 
-        PppDmlAddIfEntry(NULL, pEntry);
-        PPPIfRegDelInfo((ANSC_HANDLE)pMyObject, (ANSC_HANDLE)pContextLinkObject);
-    }
-    else
-    {
-        PppDmlSetIfCfg(NULL, &pEntry->Cfg);
-    }
     pthread_mutex_unlock(&pEntry->mDataMutex);
     
     return 0;
@@ -2933,8 +2454,7 @@ IPCP_Rollback
         ANSC_HANDLE                 hInsContext
     )
 {
-    PPPP_IF_LINK_OBJECT       pContextLinkObject      = (PPPP_IF_LINK_OBJECT)hInsContext;
-    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)pContextLinkObject->hContext;
+    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)hInsContext;
 
     pthread_mutex_lock(&pEntry->mDataMutex);
 
@@ -3002,13 +2522,13 @@ IPv6CP_GetParamStringValue
         ULONG*                      pUlSize
     )
 {
-    PPPP_IF_LINK_OBJECT       pContextLinkObject      = (PPPP_IF_LINK_OBJECT)hInsContext;
-    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)pContextLinkObject->hContext;
+    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)hInsContext;
+
     uint32_t retStatus = -1;
     
     pthread_mutex_lock(&pEntry->mDataMutex);
 
-    PPPDmlGetIfInfo(pContextLinkObject->hContext, pEntry->Cfg.InstanceNumber, &pEntry->Info);
+    PPPDmlGetIfInfo(hInsContext, pEntry->Cfg.InstanceNumber, &pEntry->Info);
     /* check the parameter name and return the corresponding value */
     if( AnscEqualString(ParamName, "LocalInterfaceIdentifier", TRUE))
     {
@@ -3075,8 +2595,8 @@ Stats_GetParamUlongValue
         ULONG*                      puLong
     )
 {
-    PPPP_IF_LINK_OBJECT       pContextLinkObject      = (PPPP_IF_LINK_OBJECT)hInsContext;
-    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)pContextLinkObject->hContext;
+    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL)hInsContext;
+
     DML_IF_STATS               Stats = {0};
     BOOL retStatus = FALSE;
 

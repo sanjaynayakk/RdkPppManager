@@ -34,15 +34,33 @@
 
 #ifndef  _PPPMGR_DML_H_
 #define  _PPPMGR_DML_H_
+#include "pppmgr_global.h"
 
 #define DML_PPP_SUPPORTED_NCP_ATCP   0x01
 #define DML_PPP_SUPPORTED_NCP_IPCP   0x02
 #define DML_PPP_SUPPORTED_NCP_IPXCP  0x04
 #define DML_PPP_SUPPORTED_NCP_NBFCP  0x08
 #define DML_PPP_SUPPORTED_NCP_IPv6CP 0x10
+#define PSM_PPPMANAGER_PPPIFCOUNT     "dmsb.pppmanager.pppifcount"
+#define PSM_PPP_IF_SERVICE_NAME       "dmsb.pppmanager.if.%d.ServiceName"
+#define PSM_PPP_IF_NAME               "dmsb.pppmanager.if.%d.Name"
+#define PSM_PPP_IF_ALIAS               "dmsb.pppmanager.if.%d.Alias"
+#define PSM_PPP_AUTH_PROTOCOL         "dmsb.pppmanager.if.%d.AuthenticationProtocol"
+#define PSM_PPP_LAST_COONECTION_ERROR "dmsb.pppmanager.if.%d.lastconnectionerror"
+#define PSM_PPP_IDLETIME              "dmsb.pppmanager.if.%d.idletime"
+#define PSM_PPP_MAXMRUSIZE            "dmsb.pppmanager.if.%d.maxmrusize"
+#define PSM_PPP_LINK_TYPE             "dmsb.pppmanager.if.%d.linktype"
+#define PSM_PPP_LOWERLAYERS           "dmsb.pppmanager.if.%d.LowerLayer"
 
 #define  ACCESS_PPP_IF_LINK_OBJECT(p)              \
     ACCESS_CONTAINER(p, PPP_IF_LINK_OBJECT, Linkage)
+
+//WANManager
+#define WAN_DBUS_PATH                    "/com/cisco/spvtg/ccsp/wanmanager"
+#define WAN_COMPONENT_NAME               "eRT.com.cisco.spvtg.ccsp.wanmanager"
+
+#define  DML_IF_NAME_LENGTH                    512
+#define  PPP_CREDS_MAX_LEN                     65
 
 typedef  struct
 _DML_IF_STATS
@@ -94,13 +112,14 @@ typedef  enum _DML_PPP_CONN_STATUS
     DML_PPP_CONN_STATUS_Connected,
     DML_PPP_CONN_STATUS_PendingDisconnect,
     DML_PPP_CONN_STATUS_Disconnecting,
-    DML_PPP_CONN_STATUS_Disconnected
+    DML_PPP_CONN_STATUS_Disconnected,
+    DML_PPP_CONN_STATUS_AuthenticationFailed
 }
 DML_PPP_CONN_STATUS, *PDML_PPP_CONN_STATUS;
 
 typedef  struct _DML_PPP_IF_CFG
 {
-    ULONG                           InstanceNumber;
+    UINT                           InstanceNumber;
     char                            Alias[DML_IF_NAME_LENGTH];
 
     BOOLEAN                         bEnabled;
@@ -127,6 +146,7 @@ typedef  struct _DML_PPP_IF_CFG
     BOOLEAN                         PassthroughEnable;
     char                            PassthroughDHCPPool[DML_IF_NAME_LENGTH];   /* Alias of the DHCP pool */
 	int                             WanInstanceNumber; 
+	int                             WanVirtIfaceInstance; 
 }
 DML_PPP_IF_CFG,  *PDML_PPP_IF_CFG;
 
@@ -237,10 +257,7 @@ DML_PPP_IF_FULL, *PDML_PPP_IF_FULL;
 
 typedef  struct _DATAMODEL_PPP
 {
-    SLIST_HEADER                        IfList;                             
-    ULONG                               ulIfNextInstance;                   
-    ANSC_HANDLE                         hIrepFolderCOSA;                    
-    ANSC_HANDLE                         hIrepFolderPPPIf;                   
+   DML_PPP_IF_FULL                    PppTable[128];
 }
 DATAMODEL_PPP,  *PDATAMODEL_PPP;
 

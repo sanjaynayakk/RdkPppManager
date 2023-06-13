@@ -32,8 +32,7 @@
  * limitations under the License.
  */
 
-#include "pppmgr_ssp_global.h"
-#include "pppmgr_ssp_messagebus_interface.h"
+#include "pppmgr_global.h"
 
 ANSC_HANDLE                 bus_handle               = NULL;
 extern char                 g_Subsystem[32];

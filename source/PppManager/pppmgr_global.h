@@ -32,10 +32,103 @@
  * limitations under the License.
  */
 
-#ifndef  _PPPMGR_SSP_INTERNAL_H_
-#define  _PPPMGR_SSP_INTERNAL_H_
+#ifndef  _PPPMGR_GLOBAL_
+#define  _PPPMGR_GLOBAL_
 
-#include "pppmgr_dml_plugin_main_apis.h"
+
+#ifdef _ALMIB_EXPORTS
+#define ANSC_EXPORT_API                                __declspec(dllexport)
+#else
+#define ANSC_EXPORT_API                                __declspec(dllimport)
+#endif
+
+
+#ifdef _ANSC_LINUX
+#define ANSC_EXPORT_API
+#endif
+
+
+#include <stdio.h>
+#include <time.h>
+#include "ccsp_trace.h"
+#include "ansc_status.h"
+#include "ansc_debug_wrapper_base.h"
+#include "ansc_common_structures.h"
+#include "cosa_plugin_api.h"
+#include "slap_definitions.h"
+
+#ifndef WIN32
+#include "ccsp_message_bus.h"
+#endif
+
+#include "ccsp_base_api.h"
+
+#include "slap_vco_exported_api.h"
+
+#include "dslh_ifo_mpa.h"
+#include "dslh_dmagnt_interface.h"
+#include "dslh_dmagnt_exported_api.h"
+
+#include "ccsp_ifo_ccd.h"
+#include "ccc_ifo_mbi.h"
+
+#include "messagebus_interface_helper.h"
+#include "dslh_cpeco_interface.h"
+#include "dslh_cpeco_exported_api.h"
+#include "safec_lib_common.h"
+#include "user_socket.h"
+#include "ansc_platform.h"
+
+#include "ansc_string.h"
+#include "cm_hal.h"
+
+#include "poam_irepfo_interface.h"
+#include "sys_definitions.h"
+#include <utapi.h>
+#include "platform_hal.h"
+
+
+
+#include "ccsp_memory.h"
+
+#define  COMMON_COMPONENT_FREERESOURCES_PRIORITY_High  1
+#define  COMMON_COMPONENT_FREERESOURCES_PRIORITY_Low   2
+
+ANSC_STATUS
+ssp_Mbi_MessageBusEngage
+    (
+        char * component_id,
+        char * config_file,
+        char * path
+    );
+
+int
+ssp_Mbi_Initialize
+    (
+        void * user_data
+    );
+
+int
+ssp_Mbi_Finalize
+    (
+        void * user_data
+    );
+
+int
+ssp_Mbi_Buscheck
+    (
+        void * user_data
+    );
+
+int
+ssp_Mbi_FreeResources
+    (
+        int priority,
+        void * user_data
+    );
+
+
+
 
 #define  RDK_COMPONENT_ID_PPP_MANAGER                             "com.cisco.spvtg.ccsp.pppmanager"
 #define  RDK_COMPONENT_NAME_PPP_MANAGER                           "com.cisco.spvtg.ccsp.pppmanager"
