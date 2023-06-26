@@ -271,12 +271,40 @@ extern ANSC_STATUS PppMgr_closeIpcSocket(int32_t sockFd)
 #endif
 }
 
+
 /* --------------------------------------------------------------------
-Function : PppMgr_SetErrorStatus
+Function : PppMgr_SetLinkStatusDown
 
 Decription: This API will set down state to wan manager IPCP status
 -----------------------------------------------------------------------*/
-static ANSC_STATUS PppMgr_SetErrorStatus(INT PppIfInstance)
+ANSC_STATUS PppMgr_SetLinkStatusDown(INT PppIfInstance)
+{
+
+    PPPEventQData eventData = {0};
+
+    eventData.action = PPPMGR_BUS_SET; 
+    eventData.PppIfInstance = PppIfInstance; 
+    eventData.comPath = WAN_COMPONENT_NAME;
+    eventData.busPath = WAN_DBUS_PATH;
+    eventData.keyPath = PPP_LCP_STATUS_PARAM_NAME;
+    strncpy(eventData.val, PPP_IPCP_STATUS_DOWN, sizeof(eventData.val) - 1);
+
+    if (PppMgr_SendDataToQ(&eventData) != ANSC_STATUS_SUCCESS)
+    {
+        CcspTraceError(("%s %d - Failed to send data to Q\n", __FUNCTION__, __LINE__));
+        return ANSC_STATUS_FAILURE;
+    }
+
+    return ANSC_STATUS_SUCCESS;
+}
+
+
+/* --------------------------------------------------------------------
+Function : PppMgr_SetIPCPStatusDown
+
+Decription: This API will set down state to wan manager IPCP status
+-----------------------------------------------------------------------*/
+ANSC_STATUS PppMgr_SetIPCPStatusDown(INT PppIfInstance)
 {
 
     PPPEventQData eventData = {0};
@@ -298,11 +326,11 @@ static ANSC_STATUS PppMgr_SetErrorStatus(INT PppIfInstance)
 }
 
 /* --------------------------------------------------------------------
-Function : PppMgr_SetIpv6ErrorStatus
+Function : PppMgr_SetIPv6CPStatusDown
 
 Decription: This API will set down state to wan manager IPV6CP 
 -----------------------------------------------------------------------*/
-static ANSC_STATUS PppMgr_SetIpv6ErrorStatus(INT PppIfInstance)
+ANSC_STATUS PppMgr_SetIPv6CPStatusDown(INT PppIfInstance)
 {
     PPPEventQData eventData = {0};
 
@@ -646,7 +674,7 @@ static ANSC_STATUS PppMgr_ProcessIpcpParams(int InstanceNumber, ipc_ppp_event_ms
     /* check incoming message for PPP IPCP complete state */
     if (pppEventMsg.pppState != PPP_IPCP_COMPLETED)
     {
-        PppMgr_SetErrorStatus(InstanceNumber);
+        PppMgr_SetIPCPStatusDown(InstanceNumber);
         return ANSC_STATUS_FAILURE;
     }
 
@@ -657,7 +685,7 @@ static ANSC_STATUS PppMgr_ProcessIpcpParams(int InstanceNumber, ipc_ppp_event_ms
     {
         CcspTraceInfo(("[%s-%d] Network parameters are missing from client message\n", __FUNCTION__, __LINE__));
 
-        PppMgr_SetErrorStatus(InstanceNumber);
+        PppMgr_SetIPCPStatusDown(InstanceNumber);
         return ANSC_STATUS_FAILURE;
     }
 
@@ -676,7 +704,7 @@ static ANSC_STATUS PppMgr_ProcessIpcpParams(int InstanceNumber, ipc_ppp_event_ms
             CcspTraceError(("%s %d: Setting Local IP Falure%s\n", __FUNCTION__, 
                         __LINE__, pppEventMsg.event.pppIpcpMsg.ip));
 
-            PppMgr_SetErrorStatus(pEntry->Cfg.InstanceNumber);
+            PppMgr_SetIPCPStatusDown(pEntry->Cfg.InstanceNumber);
             PppMgr_GetIfaceData_release(pEntry);
             return ANSC_STATUS_FAILURE;
         }
@@ -687,7 +715,7 @@ static ANSC_STATUS PppMgr_ProcessIpcpParams(int InstanceNumber, ipc_ppp_event_ms
             CcspTraceError(("[%s-%d] Setting Remote IP Falure%s\n", __FUNCTION__, __LINE__,
                         pppEventMsg.event.pppIpcpMsg.gateway));
 
-            PppMgr_SetErrorStatus(pEntry->Cfg.InstanceNumber);
+            PppMgr_SetIPCPStatusDown(pEntry->Cfg.InstanceNumber);
             PppMgr_GetIfaceData_release(pEntry);
             return ANSC_STATUS_FAILURE;
         }
@@ -710,7 +738,7 @@ static ANSC_STATUS PppMgr_ProcessIpcpParams(int InstanceNumber, ipc_ppp_event_ms
         {
             CcspTraceInfo((" DNS parsing failed in received message\n"));
 
-            PppMgr_SetErrorStatus(pEntry->Cfg.InstanceNumber);
+            PppMgr_SetIPCPStatusDown(pEntry->Cfg.InstanceNumber);
             PppMgr_GetIfaceData_release(pEntry);
             return ANSC_STATUS_FAILURE;
         }
@@ -816,7 +844,7 @@ static ANSC_STATUS PppMgr_ProcessIpv6cpParams(int InstanceNumber, ipc_ppp_event_
         else
         {
             PppMgr_RemoveDuidFile(pEntry->Info.Name);
-            PppMgr_SetIpv6ErrorStatus(pEntry->Cfg.InstanceNumber);    
+            PppMgr_SetIPv6CPStatusDown(pEntry->Cfg.InstanceNumber);    
         }
         PppMgr_GetIfaceData_release(pEntry);
     }

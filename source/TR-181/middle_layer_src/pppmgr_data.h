@@ -121,4 +121,9 @@ DML_PPP_IF_FULL  * PppMgr_GetIfaceData_locked (UINT pppIfaceInstance);
 
 void PppMgr_GetIfaceData_release (DML_PPP_IF_FULL * pPppTable);
 
+
+ANSC_STATUS PppMgr_SetLinkStatusDown(INT PppIfInstance);
+ANSC_STATUS PppMgr_SetIPCPStatusDown(INT PppIfInstance);
+ANSC_STATUS PppMgr_SetIPv6CPStatusDown(INT PppIfInstance);
+
 #endif

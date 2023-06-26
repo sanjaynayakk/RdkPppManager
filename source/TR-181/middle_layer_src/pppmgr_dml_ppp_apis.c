@@ -395,14 +395,30 @@ ANSC_STATUS PppMgr_StopPppClient (UINT InstanceNumber)
     if (pEntry != NULL)
     {
         pEntry->Cfg.bEnabled = false;
+
 #ifdef USE_PPP_DAEMON
         PppMgr_stopPppProcess(pEntry->Info.pppPid);
         pEntry->Info.pppPid = 0;
 #else
         PppMgr_stopPppoe();
 #endif
+
+        // reset all session data
+        pEntry->Info.Status = DML_IF_STATUS_Down;
+        pEntry->Info.ConnectionStatus = DML_PPP_CONN_STATUS_Unconfigured;
+        memset (&pEntry->Info.LocalIPAddress, 0, sizeof(pEntry->Info.LocalIPAddress));
+        memset (&pEntry->Info.RemoteIPAddress, 0, sizeof(pEntry->Info.RemoteIPAddress));
+        memset (&pEntry->Info.DNSServers, 0, sizeof(pEntry->Info.DNSServers));
+        memset(pEntry->Info.Ip6LocalIfID,0,sizeof(pEntry->Info.Ip6LocalIfID));
+        memset(pEntry->Info.Ip6RemoteIfID,0,sizeof(pEntry->Info.Ip6RemoteIfID));
+
+
         PppMgr_GetIfaceData_release(pEntry);
         pEntry = NULL;
+
+        PppMgr_SetLinkStatusDown(InstanceNumber);
+        PppMgr_SetIPCPStatusDown(InstanceNumber);
+        PppMgr_SetIPv6CPStatusDown(InstanceNumber);
         return ANSC_STATUS_SUCCESS;
     }
     return ANSC_STATUS_FAILURE;
