@@ -32,8 +32,8 @@
  * limitations under the License.
  */
 
-#include "pppmgr_dml_plugin_main.h"
-#include "pppmgr_dml_plugin_main_apis.h"
+#include "pppmgr_global.h"
+#include "pppmgr_data.h"
 #include "pppmgr_dml.h"
 #include "pppmgr_dml_apis.h"
 
@@ -314,8 +314,6 @@ int PppManagerDmlInit
 
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "Interface_GetEntryCount",  Interface_GetEntryCount);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "Interface_GetEntry",  Interface_GetEntry);
-    pPlugInfo->RegisterFunction(pPlugInfo->hContext, "Interface_AddEntry",  Interface_AddEntry);
-    pPlugInfo->RegisterFunction(pPlugInfo->hContext, "Interface_DelEntry",  Interface_DelEntry);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "Interface_GetParamBoolValue",  Interface_GetParamBoolValue);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "Interface_GetParamUlongValue",  Interface_GetParamUlongValue);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "Interface_GetParamStringValue",  Interface_GetParamStringValue);

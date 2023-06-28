@@ -32,15 +32,16 @@
  * limitations under the License.
  */
 
-#include "pppmgr_ssp_global.h"
-#include "pppmgr_dml_plugin_main_apis.h"
+#include "pppmgr_global.h"
+#include "pppmgr_data.h"
 #include "pppmgr_dml_ppp_apis.h"
 #include "pppmgr_dml.h"
-
-#define PPP_LCPEcho 30
-#define PPP_LCPEchoRetry 3
+#include <regex.h>
 
 #define NET_STATS_FILE "/proc/net/dev"
+#define PPPoE_VLAN_IF_NAME  "vlan101"
+#define PPP_LCPEcho 30
+#define PPP_LCPEchoRetry 3
 
 static int CosaUtilGetIfStats(char *ifname, PDML_IF_STATS pStats);
 extern char g_Subsystem[32];
@@ -59,13 +60,40 @@ PppDmlGetSupportedNCPs
     return ANSC_STATUS_SUCCESS;
 }
 
-ULONG
-PppDmlIfGetNumberOfEntries ()
+ANSC_STATUS GetNumOfInstance (int *count)
 {
-    PDATAMODEL_PPP           pPpp         = (PDATAMODEL_PPP)g_pBEManager->hPPP;
 
-    return pPpp->ulIfNextInstance;
+    int ret_val = ANSC_STATUS_SUCCESS;
+    int retPsmGet = CCSP_SUCCESS;
+    char* param_value = NULL;
+
+    retPsmGet = PSM_Get_Record_Value2(bus_handle,g_Subsystem, PSM_PPPMANAGER_PPPIFCOUNT, NULL, &param_value);
+    if (retPsmGet != CCSP_SUCCESS) { \
+        AnscTraceFlow(("%s Error %d reading %s %s\n", __FUNCTION__, retPsmGet, PSM_PPPMANAGER_PPPIFCOUNT, param_value));
+        ret_val = ANSC_STATUS_FAILURE;
+    }
+    else if(param_value != NULL) {
+        sscanf(param_value, "%d", count);
+        ((CCSP_MESSAGE_BUS_INFO *)bus_handle)->freefunc(param_value);
+    }
+
+    return ret_val;
+
 }
+
+
+ULONG DmlGetTotalNoOfPPPInterfaces
+(
+  ANSC_HANDLE                 hContext
+)
+{
+    int ppp_if_count = 0 ;
+
+    GetNumOfInstance(&ppp_if_count);
+
+    return ppp_if_count;
+}
+
 
 ANSC_STATUS
 PppDmlGetIfStats
@@ -78,9 +106,8 @@ PppDmlGetIfStats
 {
     char wan_interface[10] = {0};
 
-    AnscCopyString(wan_interface, pEntry->Cfg.Alias);
+    AnscCopyString( wan_interface, pEntry->Info.Name);
     CosaUtilGetIfStats(wan_interface,pStats);
-
     return ANSC_STATUS_SUCCESS;
 }
 
@@ -97,22 +124,306 @@ PPPDmlGetIfInfo
         return ANSC_STATUS_FAILURE;
     }
 
+    //TODO Need to revisit
+    /*not supported*/
+    pInfo->EncryptionProtocol  =  DML_PPP_ENCRYPTION_None;
+    pInfo->CompressionProtocol = DML_PPP_COMPRESSION_None;
+
+    /*hardcoded by backend*/
     pInfo->LCPEchoRetry = PPP_LCPEchoRetry;
     pInfo->LCPEcho      = PPP_LCPEcho;
 
     pInfo->SessionID    = 0;
     get_session_id(&pInfo->SessionID, hContext);
+
     return ANSC_STATUS_SUCCESS;
 }
 
-ANSC_STATUS
-PppDmlIfReset
-    (
-        ANSC_HANDLE                 hContext,
-        ULONG                       ulInstanceNumber
-    )
+ANSC_STATUS PppMgr_SendPppdStartEventToQ (UINT InstanceNumber)
 {
+    PDML_PPP_IF_FULL pEntry=NULL;
+    pEntry = PppMgr_GetIfaceData_locked(InstanceNumber);
+    if (pEntry != NULL)
+    {
+        PPPEventQData eventData = {0};
+        eventData.action = PPPMGR_EXEC_PPP_CLIENT;
+        eventData.PppIfInstance = pEntry->Cfg.InstanceNumber;
+
+        if (PppMgr_SendDataToQ(&eventData) != ANSC_STATUS_SUCCESS)
+        {
+            CcspTraceError(("%s %d - Failed to send data to Q\n", __FUNCTION__, __LINE__));
+            PppMgr_GetIfaceData_release(pEntry);
+            return ANSC_STATUS_FAILURE;
+        }
+        pEntry->Cfg.bEnabled = true;
+        CcspTraceInfo(("%s %d: posting PPPMGR_EXEC_PPP_CLIENT on Queue for %d\n", __FUNCTION__, __LINE__, eventData.PppIfInstance));
+        PppMgr_GetIfaceData_release(pEntry);
+        return ANSC_STATUS_SUCCESS;
+    }
+    return ANSC_STATUS_FAILURE;
+}
+
+bool PppMgr_EnableIf (UINT InstanceNumber, bool Enable)
+{
+
+    if (Enable == true)
+    {
+        CcspTraceInfo(("%s %d: Handling PPP client start for instance %d\n", __FUNCTION__, __LINE__, InstanceNumber));
+        if (PppMgr_SendPppdStartEventToQ(InstanceNumber) != ANSC_STATUS_SUCCESS)
+        {
+            CcspTraceInfo(("%d %s: posting PPPMGR_EXEC_PPP_CLIENT event to Q failed for instance %d\n", __FUNCTION__, __LINE__, InstanceNumber));
+            return false;
+        }
+    }
+    else
+    {
+        CcspTraceInfo (("%s %d: disabling PPP client on instance %d\n", __FUNCTION__, __LINE__, InstanceNumber));
+        if (PppMgr_StopPppClient(InstanceNumber) != ANSC_STATUS_SUCCESS)
+        {
+            CcspTraceInfo(("%d %s: failed to stop ppp client on instace %d\n", __FUNCTION__, __LINE__, InstanceNumber));
+            return false;
+        }
+    }
+    return true;
+}
+
+static int PppMgr_GetWanIfaceInstance (UINT InstanceNumber, int * WanIfaceInstance, int * WanVirtIfaceInstance)
+{
+    if (InstanceNumber <= 0 || WanIfaceInstance == NULL || WanVirtIfaceInstance == NULL)
+    {
+        CcspTraceError(("%s %d: Invalid args\n", __FUNCTION__, __LINE__));
+        return -1;
+    }
+
+    INT iTotalNoofEntries;
+    INT iTotalNoofVirtualIface;
+    INT iIfaceCount;
+    INT iVcount;
+    char acTmpReturnValue[256] = {0};
+    char acTmpQueryParam[256] = {0};
+    char PppInterfacePath[128] = {0};
+
+    if (ANSC_STATUS_FAILURE == DmlPppMgrGetParamValues(WAN_COMPONENT_NAME, WAN_DBUS_PATH, WAN_NOE_PARAM_NAME, acTmpReturnValue))
+    {
+        CcspTraceError(("%s %d Failed to get param value\n", __FUNCTION__, __LINE__));
+        return ANSC_STATUS_FAILURE;
+    }
+
+    // No of Wan Interfaces
+    iTotalNoofEntries = atoi(acTmpReturnValue);
+    CcspTraceInfo(("%s %d - TotalNoofEntries:%d\n", __FUNCTION__, __LINE__, iTotalNoofEntries));
+
+    if (0 >= iTotalNoofEntries)
+    {
+        CcspTraceError(("%s %d: Cannot get number of WanInterface Entry\n", __FUNCTION__, __LINE__));
+        return ANSC_STATUS_FAILURE;
+    }
+
+    snprintf(PppInterfacePath, sizeof(PppInterfacePath), PPP_IFACE_PATH , InstanceNumber);
+    CcspTraceInfo(("%s %d: comparing Wan Virtual Interfaces with %s\n", __FUNCTION__, __LINE__, PppInterfacePath));
+
+    // for each Wan Interface
+    for (iIfaceCount = 1; iIfaceCount <= iTotalNoofEntries; iIfaceCount++)
+    {
+        // get total no of VirtualInterface
+        snprintf(acTmpQueryParam, sizeof(acTmpQueryParam), WAN_NO_OF_VIRTUAL_IFACE_PARAM_NAME, iIfaceCount);
+        if (ANSC_STATUS_FAILURE == DmlPppMgrGetParamValues(WAN_COMPONENT_NAME, WAN_DBUS_PATH, acTmpQueryParam, acTmpReturnValue))
+        {
+            CcspTraceError(("%s %d Failed to get param value %s\n", __FUNCTION__, __LINE__, acTmpQueryParam));
+            return ANSC_STATUS_FAILURE;
+        }
+        iTotalNoofVirtualIface = atoi (acTmpReturnValue);
+        CcspTraceInfo(("%s %d - TotalNoof Wan Virtual Interface:%d\n", __FUNCTION__, __LINE__, iTotalNoofVirtualIface));
+
+        // for each Virtual Interface
+        for (iVcount = 1; iVcount <= iTotalNoofVirtualIface; iVcount++)
+        {
+            snprintf(acTmpQueryParam, sizeof(acTmpQueryParam), PPP_WAN_VIRTUAL_IFACE_NAME, iIfaceCount, iVcount);
+            if (ANSC_STATUS_FAILURE == DmlPppMgrGetParamValues(WAN_COMPONENT_NAME, WAN_DBUS_PATH, acTmpQueryParam, acTmpReturnValue))
+            {
+                CcspTraceError(("%s %d Failed to get param value %s\n", __FUNCTION__, __LINE__, acTmpQueryParam));
+                return ANSC_STATUS_FAILURE;
+            }
+
+            if (strcmp(acTmpReturnValue, PppInterfacePath) == 0)
+            {
+                *WanIfaceInstance = iIfaceCount;
+                *WanVirtIfaceInstance = iVcount;
+                return ANSC_STATUS_SUCCESS;
+            }
+        }
+    }
+    *WanIfaceInstance = -1;
+    *WanVirtIfaceInstance = -1;
+    return ANSC_STATUS_FAILURE;
+
+}
+
+
+ANSC_STATUS
+PppMgr_StartPppClient (UINT InstanceNumber)
+{
+    int ret ;
+    PDML_PPP_IF_FULL  pEntry = NULL;
+    char auth_proto[8] = { 0 };
+    char VLANInterfaceName[32] = { 0 };
+    char command[1024] = { 0 };
+    char config_command[1024] = { 0 };
+    char acTmpQueryParam[256] = {0};
+    int WanIfaceInstance  = -1;
+    int WanVirtIfaceInstance  = -1;
+
+    PppMgr_GetWanIfaceInstance(InstanceNumber, &WanIfaceInstance, &WanVirtIfaceInstance);
+    if ((WanIfaceInstance == -1) || (WanVirtIfaceInstance == -1))
+    {
+        CcspTraceError(("%s %d: Unable to get Wan Iface Instance\n", __FUNCTION__, __LINE__));
+        return ANSC_STATUS_FAILURE;
+    }
+
+    pEntry = PppMgr_GetIfaceData_locked (InstanceNumber);
+    {
+        if(ANSC_STATUS_SUCCESS == PppMgr_checkPidExist(pEntry->Info.pppPid))
+        {
+            CcspTraceInfo(("pppd is already running \n"));
+            PppMgr_GetIfaceData_release(pEntry);
+            return ANSC_STATUS_SUCCESS;
+        }
+
+        pEntry->Info.pppPid = 0;
+
+        // get UserName & Password from hal
+        platform_hal_GetPppUserName (pEntry->Cfg.Username, sizeof(pEntry->Cfg.Username));
+        platform_hal_GetPppPassword (pEntry->Cfg.Password, sizeof(pEntry->Cfg.Password));
+
+        if((strlen(pEntry->Info.Name) == 0) || (strlen(pEntry->Info.InterfaceServiceName) == 0) ||
+                (strlen(pEntry->Cfg.Username) == 0) || (strlen(pEntry->Cfg.Password) == 0) ||
+                (pEntry->Info.AuthenticationProtocol <= 0))
+        {
+            CcspTraceError(("%s %d: unable to get PPP params\n", __FUNCTION__, __LINE__));
+            PppMgr_GetIfaceData_release(pEntry);
+            return ANSC_STATUS_FAILURE;
+        }
+
+            if((pEntry->Info.AuthenticationProtocol == DML_PPP_AUTH_CHAP) ||
+                    (pEntry->Info.AuthenticationProtocol ==  DML_PPP_AUTH_PAP))
+            {
+                sprintf(auth_proto,"0");
+            }
+            else
+            {
+                /* support for mschap */
+                sprintf(auth_proto,"4");
+            }
+
+            if(pEntry->Cfg.LinkType == DML_PPPoA_LINK_TYPE)
+            {
+                CcspTraceInfo(("%s %d: PPPoA_LINK_TYPE: constructing arguments\n", __FUNCTION__, __LINE__));
+#ifdef USE_PPP_DAEMON
+                snprintf(command, sizeof(command), "pppd -6 -c %s -a %s -u %s -p %s -f %s &",
+                        pEntry->Info.Name, pEntry->Info.InterfaceServiceName, pEntry->Cfg.Username,
+                        pEntry->Cfg.Password, auth_proto);
+#else
+                /* Assume a default rp-pppoe config exist. Update rp-pppoe configuration */
+                ret =  snprintf(config_command, sizeof(config_command), "pppoe_config.sh %s %s %s %s PPPoA %d %d",
+                        pEntry->Cfg.Username, pEntry->Cfg.Password, pEntry->Info.InterfaceServiceName, pEntry->Info.Name, pEntry->Info.LCPEcho, pEntry->Info.LCPEchoRetry);
+                if(ret > 0 && ret <= sizeof(config_command))
+                {
+                    system(config_command);
+                }
+                /* start rp-pppoe */
+                ret = snprintf(command, sizeof(command), "/usr/sbin/pppoe-start");
+                if(ret > 0 && ret <= sizeof(command))
+                {
+                    CcspTraceInfo((" successfully started rp-pppoe \n"));
+                }
+#endif
+            }
+            else if (pEntry->Cfg.LinkType == DML_PPPoE_LINK_TYPE)
+            {
+                CcspTraceInfo(("%s %d: PPPoE_LINK_TYPE: constructing arguments\n", __FUNCTION__, __LINE__));
+#ifdef USE_PPP_DAEMON
+                snprintf(command, sizeof(command), "pppd -6 -c %s -i %s -u %s -p %s -f %s &",
+                        pEntry->Info.Name, PPPoE_VLAN_IF_NAME, pEntry->Cfg.Username, pEntry->Cfg.Password, auth_proto);
+#else
+                ret = snprintf(acTmpQueryParam, sizeof(acTmpQueryParam),"%s.%s",pEntry->Cfg.LowerLayers,"Name");
+                if(ret > 0 && ret <= sizeof(config_command))
+                {
+                    if(ANSC_STATUS_FAILURE == DmlPppMgrGetParamValues(WAN_COMPONENT_NAME, WAN_DBUS_PATH, acTmpQueryParam, VLANInterfaceName))
+                    {
+                        CcspTraceError(("%s %d Failed to get param value\n", __FUNCTION__, __LINE__));
+                    PppMgr_GetIfaceData_release(pEntry);
+                    return ANSC_STATUS_FAILURE;
+                    } 
+                }
+
+                /* Assume a defule rp-pppoe config exist. Update rp-pppoe configuration */
+                ret = snprintf(config_command, sizeof(config_command), "pppoe_config.sh '%s' '%s' %s %s PPPoE %d %d %d ",
+                        pEntry->Cfg.Username, pEntry->Cfg.Password, PPPoE_VLAN_IF_NAME, pEntry->Info.Name, pEntry->Info.LCPEcho , pEntry->Info.LCPEchoRetry,pEntry->Cfg.MaxMRUSize);
+                if(ret > 0 && ret <= sizeof(config_command))
+                {
+                    system(config_command);
+                }
+
+                /* start rp-pppoe */
+                ret = snprintf(command, sizeof(command), "/usr/sbin/pppoe-start");
+                if(ret > 0 && ret <= sizeof(command))
+                {
+                    CcspTraceInfo((" successfully started rp-pppoe \n"));
+                }
+#endif
+            }
+        CcspTraceInfo(("command to execute is  '%s'\n", command));
+
+        system(command);
+
+        pEntry->Info.pppPid = PppMgr_getPppPid(NULL);
+
+        pEntry->Cfg.WanInstanceNumber = WanIfaceInstance;
+        pEntry->Cfg.WanVirtIfaceInstance = WanVirtIfaceInstance;
+  
+        PppMgr_GetIfaceData_release(pEntry);
+        }
     return ANSC_STATUS_SUCCESS;
+
+
+}
+
+ANSC_STATUS PppMgr_StopPppClient (UINT InstanceNumber)
+{
+    PDML_PPP_IF_FULL  pEntry = NULL;
+    pEntry = PppMgr_GetIfaceData_locked(InstanceNumber);
+    if (pEntry != NULL)
+    {
+        pEntry->Cfg.bEnabled = false;
+#ifdef USE_PPP_DAEMON
+        PppMgr_stopPppProcess(pEntry->Info.pppPid);
+        pEntry->Info.pppPid = 0;
+#else
+        PppMgr_stopPppoe();
+#endif
+        PppMgr_GetIfaceData_release(pEntry);
+        pEntry = NULL;
+        return ANSC_STATUS_SUCCESS;
+    }
+    return ANSC_STATUS_FAILURE;
+}
+
+
+ANSC_STATUS PppDmlIfReset (ULONG InstanceNumber )
+{
+    CcspTraceInfo (("%s %d: disabling PPP client on instance %d\n", __FUNCTION__, __LINE__, InstanceNumber));
+    if (PppMgr_StopPppClient(InstanceNumber) != ANSC_STATUS_SUCCESS)
+    {
+        CcspTraceInfo(("%d %s: failed to stop ppp client on instace %d\n", __FUNCTION__, __LINE__, InstanceNumber));
+        return false;
+    }
+    CcspTraceInfo(("%s %d: Handling PPP client start for instance %d\n", __FUNCTION__, __LINE__, InstanceNumber));
+    if (PppMgr_SendPppdStartEventToQ(InstanceNumber) != ANSC_STATUS_SUCCESS)
+    {
+        CcspTraceInfo(("%d %s: posting PPPMGR_EXEC_PPP_CLIENT event to Q failed for instance %d\n", __FUNCTION__, __LINE__, InstanceNumber));
+        return false;
+    }
+    return true;
 }
 
 ANSC_STATUS
@@ -125,23 +436,65 @@ PppDmlGetIfCfg
     return ANSC_STATUS_SUCCESS;
 }
 
-ANSC_STATUS
-PppDmlAddIfEntry
-    (
-        ANSC_HANDLE                 hContext,
-        PDML_PPP_IF_FULL       pEntry
-    )
+int validateUsername( char* pString)
 {
-    return ANSC_STATUS_SUCCESS;
+    int ret=-1;
+    regex_t reg;
+    const char *Url_Pattern= "^[a-zA-Z0-9_#-.@]*$";
+    regcomp(&reg ,Url_Pattern, REG_EXTENDED);
+    ret = regexec(&reg, pString, 0, NULL, 0);
+    if (ret == 0) {
+        return 0;
+    }
+    else {
+       CcspTraceWarning(("Invalid username '%s'\n", pString));
+       return -1;
+    }
 }
 
-ANSC_STATUS
-PppDmlDelIfEntry
-    (
-        ANSC_HANDLE                 hContext,
-        ULONG                       ulInstanceNumber
-    )
+int PppMgr_RdkBus_SetParamValuesToDB( char *pParamName, char *pParamVal )
 {
+    int     retPsmSet  = CCSP_SUCCESS;
+    /* Input Validation */
+    if( ( NULL == pParamName) || ( NULL == pParamVal ) )
+    {
+        CcspTraceError(("%s Invalid Input Parameters\n",__FUNCTION__));
+        return CCSP_FAILURE;
+    }
+
+    retPsmSet = PSM_Set_Record_Value2(bus_handle,g_Subsystem, pParamName, ccsp_string, pParamVal);
+    if (retPsmSet != CCSP_SUCCESS) {
+        CcspTraceError(("%s Error %d writing %s\n", __FUNCTION__, retPsmSet, pParamName));
+    }
+
+    return retPsmSet;
+}
+
+static int PppManager_SetParamFromPSM(PDML_PPP_IF_FULL pEntry)
+{
+    int retPsmSet = CCSP_SUCCESS;
+    char param_name[256] = {0};
+    char param_value[256] = {0};
+    int instancenum = 0;
+
+    instancenum = pEntry->Cfg.InstanceNumber;
+
+    CcspTraceWarning(("%s-%d:instancenum=%d \n",__FUNCTION__, __LINE__, instancenum));
+
+    memset(param_value, 0, sizeof(param_value));
+    memset(param_name, 0, sizeof(param_name));
+
+    sprintf(param_value, "%d", pEntry->Cfg.IdleDisconnectTime);
+    sprintf(param_name, PSM_PPP_IDLETIME, instancenum);
+    PppMgr_RdkBus_SetParamValuesToDB(param_name,param_value);
+
+    memset(param_value, 0, sizeof(param_value));
+    memset(param_name, 0, sizeof(param_name));
+	
+    sprintf(param_value, "%d", pEntry->Cfg.MaxMRUSize);
+    sprintf(param_name, PSM_PPP_MAXMRUSIZE, instancenum);
+    PppMgr_RdkBus_SetParamValuesToDB(param_name,param_value);
+
     return ANSC_STATUS_SUCCESS;
 }
 
@@ -152,7 +505,14 @@ PppDmlSetIfCfg
         PDML_PPP_IF_CFG        pCfg        /* Identified by InstanceNumber */
     )
 {
-    return ANSC_STATUS_SUCCESS;
+     int ret_val = ANSC_STATUS_SUCCESS;
+     ret_val = PppManager_SetParamFromPSM(pCfg);
+     if(ret_val != ANSC_STATUS_SUCCESS)
+     {
+         CcspTraceError(("%s %d Failed \n", __FUNCTION__, __LINE__));
+     }
+
+     return ret_val;
 }
 
 ANSC_STATUS
@@ -168,350 +528,6 @@ PppDmlSetIfValues
 }
 
 ANSC_STATUS
-PPPIfRegGetInfo
-    (
-        ANSC_HANDLE                 hThisObject
-    )
-{
-    PDATAMODEL_PPP             pMyObject               = (PDATAMODEL_PPP      )hThisObject;
-    PSLIST_HEADER                   pListHead               = (PSLIST_HEADER            )&pMyObject->IfList;
-    PPOAM_IREP_FOLDER_OBJECT        pPoamIrepFoPPPIf        = (PPOAM_IREP_FOLDER_OBJECT )pMyObject->hIrepFolderPPPIf;
-    PPOAM_IREP_FOLDER_OBJECT        pPoamIrepFoPPPIfSp      = (PPOAM_IREP_FOLDER_OBJECT )NULL;
-    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL    )NULL;
-    PPPP_IF_LINK_OBJECT       pLinkContext            = (PPPP_IF_LINK_OBJECT)NULL;
-    PSLAP_VARIABLE                  pSlapVariable           = (PSLAP_VARIABLE           )NULL;
-    ULONG                           ulEntryCount            = 0;
-    ULONG                           ulIndex                 = 0;
-    ULONG                           ulInstanceNumber        = 0;
-    char*                           pFolderName             = NULL;
-    char*                           pAlias                  = NULL;
-
-    if ( !pPoamIrepFoPPPIf )
-    {
-        return ANSC_STATUS_FAILURE;
-    }
-
-    /* Load the newly added but not yet commited entries */
-
-    ulEntryCount = pPoamIrepFoPPPIf->GetFolderCount((ANSC_HANDLE)pPoamIrepFoPPPIf);
-
-    for ( ulIndex = 0; ulIndex < ulEntryCount; ulIndex++ )
-    {
-        pFolderName =
-            pPoamIrepFoPPPIf->EnumFolder
-                (
-                    (ANSC_HANDLE)pPoamIrepFoPPPIf,
-                    ulIndex
-                );
-
-        if ( !pFolderName )
-        {
-            continue;
-        }
-
-        pPoamIrepFoPPPIfSp = pPoamIrepFoPPPIf->GetFolder((ANSC_HANDLE)pPoamIrepFoPPPIf, pFolderName);
-
-        AnscFreeMemory(pFolderName);
-
-        if ( !pPoamIrepFoPPPIfSp )
-        {
-            continue;
-        }
-
-        if ( TRUE )
-        {
-            pSlapVariable =
-                (PSLAP_VARIABLE)pPoamIrepFoPPPIfSp->GetRecord
-                    (
-                        (ANSC_HANDLE)pPoamIrepFoPPPIfSp,
-                        DML_RR_NAME_PPPIFInsNum,
-                        NULL
-                    );
-
-            if ( pSlapVariable )
-            {
-                ulInstanceNumber = pSlapVariable->Variant.varUint32;
-
-                SlapFreeVariable(pSlapVariable);
-            }
-        }
-
-        if ( TRUE )
-        {
-            pSlapVariable =
-                (PSLAP_VARIABLE)pPoamIrepFoPPPIfSp->GetRecord
-                    (
-                        (ANSC_HANDLE)pPoamIrepFoPPPIfSp,
-                        DML_RR_NAME_PPPIFAlias,
-                        NULL
-                    );
-
-            if ( pSlapVariable )
-            {
-                pAlias = AnscCloneString(pSlapVariable->Variant.varString);
-
-                SlapFreeVariable(pSlapVariable);
-            }
-        }
-
-        pLinkContext = (PPPP_IF_LINK_OBJECT)AnscAllocateMemory(sizeof(PPP_IF_LINK_OBJECT));
-
-        if ( !pLinkContext )
-        {
-            AnscFreeMemory(pAlias);
-
-            return ANSC_STATUS_RESOURCES;
-        }
-
-        pEntry = (PDML_PPP_IF_FULL)AnscAllocateMemory(sizeof(DML_PPP_IF_FULL));
-
-        if ( !pEntry )
-        {
-            AnscFreeMemory(pAlias);
-            AnscFreeMemory(pLinkContext);
-
-            return ANSC_STATUS_RESOURCES;
-        }
-
-        AnscCopyString(pEntry->Cfg.Alias, pAlias);
-
-        pEntry->Cfg.InstanceNumber = ulInstanceNumber;
-
-        pLinkContext->InstanceNumber        = ulInstanceNumber;
-        pLinkContext->bNew                  = TRUE;
-        pLinkContext->hContext              = (ANSC_HANDLE)pEntry;
-        pLinkContext->hParentTable          = NULL;
-        pLinkContext->hPoamIrepUpperFo      = (ANSC_HANDLE)pPoamIrepFoPPPIf;
-        pLinkContext->hPoamIrepFo           = (ANSC_HANDLE)pPoamIrepFoPPPIfSp;
-
-        PppSListPushEntryByInsNum(pListHead, pLinkContext);
-
-        if ( pAlias )
-        {
-            AnscFreeMemory(pAlias);
-
-            pAlias = NULL;
-        }
-    }
-
-    return ANSC_STATUS_SUCCESS;
-}
-
-ANSC_STATUS
-PppSListPushEntryByInsNum
-    (
-        PSLIST_HEADER               pListHead,
-        PPPP_IF_LINK_OBJECT   pLinkContext
-    )
-{
-    ANSC_STATUS                     returnStatus      = ANSC_STATUS_SUCCESS;
-    PPPP_IF_LINK_OBJECT       pLinkContextEntry = (PPPP_IF_LINK_OBJECT)NULL;
-    PSINGLE_LINK_ENTRY              pSLinkEntry       = (PSINGLE_LINK_ENTRY       )NULL;
-    ULONG                           ulIndex           = 0;
-
-    if ( pListHead->Depth == 0 )
-    {
-        AnscSListPushEntryAtBack(pListHead, &pLinkContext->Linkage);
-    }
-    else
-    {
-        pSLinkEntry = AnscSListGetFirstEntry(pListHead);
-
-        for ( ulIndex = 0; ulIndex < pListHead->Depth; ulIndex++ )
-        {
-            pLinkContextEntry = ACCESS_PPP_IF_LINK_OBJECT(pSLinkEntry);
-            pSLinkEntry       = AnscSListGetNextEntry(pSLinkEntry);
-
-            if ( pLinkContext->InstanceNumber < pLinkContextEntry->InstanceNumber )
-            {
-                AnscSListPushEntryByIndex(pListHead, &pLinkContext->Linkage, ulIndex);
-
-                return ANSC_STATUS_SUCCESS;
-            }
-        }
-
-        AnscSListPushEntryAtBack(pListHead, &pLinkContext->Linkage);
-    }
-
-    return ANSC_STATUS_SUCCESS;
-}
-
-ANSC_STATUS
-PPPIfRegAddInfo
-    (
-        ANSC_HANDLE                 hThisObject,
-        ANSC_HANDLE                 hCosaContext
-    )
-{
-    ANSC_STATUS                     returnStatus            = ANSC_STATUS_SUCCESS;
-    PDATAMODEL_PPP             pMyObject               = (PDATAMODEL_PPP      )hThisObject;
-    PPOAM_IREP_FOLDER_OBJECT        pPoamIrepFoPPPIf        = (PPOAM_IREP_FOLDER_OBJECT )pMyObject->hIrepFolderPPPIf;
-    PPOAM_IREP_FOLDER_OBJECT        pPoamIrepFoPPPIfSp      = (PPOAM_IREP_FOLDER_OBJECT )NULL;
-    PPPP_IF_LINK_OBJECT       pCosaContext            = (PPPP_IF_LINK_OBJECT)hCosaContext;
-    PDML_PPP_IF_FULL           pEntry                  = (PDML_PPP_IF_FULL    )pCosaContext->hContext;
-    PSLAP_VARIABLE                  pSlapVariable           = (PSLAP_VARIABLE           )NULL;
-
-    if ( !pPoamIrepFoPPPIf )
-    {
-        return ANSC_STATUS_FAILURE;
-    }
-    else
-    {
-        pPoamIrepFoPPPIf->EnableFileSync((ANSC_HANDLE)pPoamIrepFoPPPIf, FALSE);
-    }
-
-    if ( TRUE )
-    {
-        SlapAllocVariable(pSlapVariable);
-
-        if ( !pSlapVariable )
-        {
-            returnStatus = ANSC_STATUS_RESOURCES;
-
-            goto  EXIT1;
-        }
-    }
-    if ( TRUE )
-    {
-        returnStatus =
-            pPoamIrepFoPPPIf->DelRecord
-                (
-                    (ANSC_HANDLE)pPoamIrepFoPPPIf,
-                    DML_RR_NAME_PPPIFNextInsNunmber
-                );
-
-        pSlapVariable->Syntax            = SLAP_VAR_SYNTAX_uint32;
-        pSlapVariable->Variant.varUint32 = pMyObject->ulIfNextInstance;
-
-        returnStatus =
-            pPoamIrepFoPPPIf->AddRecord
-                (
-                    (ANSC_HANDLE)pPoamIrepFoPPPIf,
-                    DML_RR_NAME_PPPIFNextInsNunmber,
-                    SYS_REP_RECORD_TYPE_UINT,
-                    SYS_RECORD_CONTENT_DEFAULT,
-                    pSlapVariable,
-                    0
-                );
-
-        SlapCleanVariable(pSlapVariable);
-        SlapInitVariable (pSlapVariable);
-    }
-
-    if ( TRUE )
-    {
-        pPoamIrepFoPPPIfSp =
-            pPoamIrepFoPPPIf->AddFolder
-                (
-                    (ANSC_HANDLE)pPoamIrepFoPPPIf,
-                    pEntry->Cfg.Alias,
-                    0
-                );
-
-        if ( !pPoamIrepFoPPPIfSp )
-        {
-            returnStatus = ANSC_STATUS_FAILURE;
-
-            goto  EXIT1;
-        }
-
-        if ( TRUE )
-        {
-            pSlapVariable->Syntax            = SLAP_VAR_SYNTAX_uint32;
-            pSlapVariable->Variant.varUint32 = pEntry->Cfg.InstanceNumber;
-
-            returnStatus =
-                pPoamIrepFoPPPIfSp->AddRecord
-                    (
-                        (ANSC_HANDLE)pPoamIrepFoPPPIfSp,
-                        DML_RR_NAME_PPPIFInsNum,
-                        SYS_REP_RECORD_TYPE_UINT,
-                        SYS_RECORD_CONTENT_DEFAULT,
-                        pSlapVariable,
-                        0
-                    );
-
-            SlapCleanVariable(pSlapVariable);
-            SlapInitVariable (pSlapVariable);
-        }
-
-        if ( TRUE )
-        {
-            pSlapVariable->Syntax            = SLAP_VAR_SYNTAX_string;
-            pSlapVariable->Variant.varString = AnscCloneString(pEntry->Cfg.Alias);
-
-            returnStatus =
-                pPoamIrepFoPPPIfSp->AddRecord
-                    (
-                        (ANSC_HANDLE)pPoamIrepFoPPPIfSp,
-                        DML_RR_NAME_PPPIFAlias,
-                        SYS_REP_RECORD_TYPE_ASTR,
-                        SYS_RECORD_CONTENT_DEFAULT,
-                        pSlapVariable,
-                        0
-                    );
-
-            SlapCleanVariable(pSlapVariable);
-            SlapInitVariable (pSlapVariable);
-        }
-
-        pCosaContext->hPoamIrepUpperFo = (ANSC_HANDLE)pPoamIrepFoPPPIf;
-        pCosaContext->hPoamIrepFo      = (ANSC_HANDLE)pPoamIrepFoPPPIfSp;
-    }
-
-EXIT1:
-
-    if ( pSlapVariable )
-    {
-        SlapFreeVariable(pSlapVariable);
-    }
-
-    pPoamIrepFoPPPIf->EnableFileSync((ANSC_HANDLE)pPoamIrepFoPPPIf, TRUE);
-
-    return returnStatus;
-}
-
-ANSC_STATUS
-PPPIfRegDelInfo
-    (
-        ANSC_HANDLE                 hThisObject,
-        ANSC_HANDLE                 hCosaContext
-    )
-{
-    ANSC_STATUS                     returnStatus      = ANSC_STATUS_SUCCESS;
-    PDATAMODEL_PPP             pMyObject         = (PDATAMODEL_PPP      )hThisObject;
-    PPPP_IF_LINK_OBJECT       pCosaContext      = (PPPP_IF_LINK_OBJECT)hCosaContext;
-    PPOAM_IREP_FOLDER_OBJECT        pPoamIrepUpperFo  = (PPOAM_IREP_FOLDER_OBJECT )pCosaContext->hPoamIrepUpperFo;
-    PPOAM_IREP_FOLDER_OBJECT        pPoamIrepFo       = (PPOAM_IREP_FOLDER_OBJECT )pCosaContext->hPoamIrepFo;
-
-    if ( !pPoamIrepUpperFo || !pPoamIrepFo )
-    {
-        return ANSC_STATUS_FAILURE;
-    }
-    else
-    {
-        pPoamIrepUpperFo->EnableFileSync((ANSC_HANDLE)pPoamIrepUpperFo, FALSE);
-    }
-
-    if ( TRUE )
-    {
-        pPoamIrepFo->Close((ANSC_HANDLE)pPoamIrepFo);
-
-        pPoamIrepUpperFo->DelFolder
-            (
-                (ANSC_HANDLE)pPoamIrepUpperFo,
-                pPoamIrepFo->GetFolderName((ANSC_HANDLE)pPoamIrepFo)
-            );
-
-        pPoamIrepUpperFo->EnableFileSync((ANSC_HANDLE)pPoamIrepUpperFo, TRUE);
-
-        AnscFreeMemory(pPoamIrepFo);
-    }
-
-    return ANSC_STATUS_SUCCESS;
-}
-
-ANSC_STATUS
 PppDmlGetIfEntry
     (
         ANSC_HANDLE                 hContext,
@@ -519,38 +535,176 @@ PppDmlGetIfEntry
         PDML_PPP_IF_FULL       pEntry
     )
 {
+    if (!pEntry)
+    {
+        return ANSC_STATUS_FAILURE;
+    }
+
+    PppDmlGetIntfValuesFromPSM(hContext,ulIndex+1,pEntry);
+
     return ANSC_STATUS_SUCCESS;
 }
 
-ANSC_STATUS PppMgr_checkPidExist(pid_t pppPid)
+ANSC_STATUS
+PppDmlGetIntfValuesFromPSM
+                (
+        ANSC_HANDLE hContext,
+        ULONG  ulIndex,
+        PDML_PPP_IF_FULL pEntry
+      )
 {
+    int retPsmGet = CCSP_SUCCESS;
+    char* param_value = NULL;
+    char param_name[256]= {0};
+    char buff[10];
 
-    pid_t pid = 0;
-    char line[64] = { 0 };
-    FILE *command = NULL;
-
-    if(pppPid)
-    {
-        command = popen("ps | grep pppd | grep -v grep | awk '{print $1}'","r");
-
-        if(command != NULL)
+    if (!pEntry)
         {
-            while(fgets(line, 64, command))
-            {
-                pid = strtoul(line, NULL,10);
-
-                if(pid == pppPid)
-                {
-                    pclose(command);
-                    return ANSC_STATUS_SUCCESS;
-                }
-            }
-            pclose(command);
+        return ANSC_STATUS_FAILURE;
         }
 
+    // init mutex
+    pthread_mutexattr_t     muttex_attr;
+    pthread_mutexattr_settype(&muttex_attr, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init(&(pEntry->mDataMutex), &(muttex_attr));
+
+    /* Get Alias */
+    sprintf(param_name, PSM_PPP_IF_ALIAS, ulIndex);
+    retPsmGet = PSM_Get_Record_Value2(bus_handle, g_Subsystem, param_name, NULL, &param_value);
+    if (retPsmGet == CCSP_SUCCESS && param_value != NULL)
+    {
+        sscanf(param_value, "%s", pEntry->Cfg.Alias);
+        CcspTraceInfo(("%s %d: from PSM %s = %s\n", __FUNCTION__, __LINE__, param_name, param_value));
     }
-    return ANSC_STATUS_FAILURE;
+    else
+    {
+        CcspTraceError(("%s %d: failed to get %s from PSM\n", __FUNCTION__, __LINE__, param_name));
+    }
+
+    /* Get service name */
+    sprintf(param_name, PSM_PPP_IF_SERVICE_NAME,ulIndex);
+    retPsmGet = PSM_Get_Record_Value2(bus_handle, g_Subsystem, param_name, NULL, &param_value);
+    if (retPsmGet == CCSP_SUCCESS && param_value != NULL)
+    {
+        sscanf(param_value, "%s", pEntry->Info.InterfaceServiceName);
+        CcspTraceInfo(("%s %d: from PSM %s = %s\n", __FUNCTION__, __LINE__, param_name, param_value));
+    }
+    else
+    {
+        CcspTraceError(("%s %d: failed to get %s from PSM\n", __FUNCTION__, __LINE__, param_name));
+    }
+
+    /* Get interface name */
+    sprintf(param_name, PSM_PPP_IF_NAME,ulIndex);
+    retPsmGet = PSM_Get_Record_Value2(bus_handle, g_Subsystem, param_name, NULL, &param_value);
+    if (retPsmGet == CCSP_SUCCESS && param_value != NULL)
+        {
+        sscanf(param_value, "%s", pEntry->Info.Name);
+        CcspTraceInfo(("%s %d: from PSM %s = %s\n", __FUNCTION__, __LINE__, param_name, param_value));
+    }
+    else
+    {
+        CcspTraceError(("%s %d: failed to get %s from PSM\n", __FUNCTION__, __LINE__, param_name));
+        }
+
+    /* Get authentication protocol */
+    sprintf(param_name, PSM_PPP_AUTH_PROTOCOL,ulIndex);
+    retPsmGet = PSM_Get_Record_Value2(bus_handle, g_Subsystem, param_name, NULL, &param_value);
+    if (retPsmGet == CCSP_SUCCESS && param_value != NULL)
+    {
+        if (strcmp(param_value, "CHAP") == 0)
+        {
+            pEntry->Info.AuthenticationProtocol = DML_PPP_AUTH_CHAP;
+        }
+        CcspTraceInfo(("%s %d: from PSM %s = %s\n", __FUNCTION__, __LINE__, param_name, param_value));
+    }
+    else
+    {
+        CcspTraceError(("%s %d: failed to get %s from PSM\n", __FUNCTION__, __LINE__, param_name));
+    }
+
+    /* Get last connection error */
+    sprintf(param_name, PSM_PPP_LAST_COONECTION_ERROR,ulIndex);
+    retPsmGet = PSM_Get_Record_Value2(bus_handle, g_Subsystem, param_name, NULL, &param_value);
+    if (retPsmGet == CCSP_SUCCESS && param_value != NULL)
+    {
+        if(strcmp(param_value,"DML_PPP_CONN_ERROR_NONE") == 0)
+            {
+            pEntry->Info.LastConnectionError = DML_PPP_CONN_ERROR_NONE;
+        }
+        CcspTraceInfo(("%s %d: from PSM %s = %s\n", __FUNCTION__, __LINE__, param_name, param_value));
+            }
+    else
+    {
+        CcspTraceError(("%s %d: failed to get %s from PSM\n", __FUNCTION__, __LINE__, param_name));
+        }
+
+    /* Get idle time  */
+    sprintf(param_name, PSM_PPP_IDLETIME, ulIndex);
+    retPsmGet = PSM_Get_Record_Value2(bus_handle, g_Subsystem, param_name, NULL, &param_value);
+    if (retPsmGet == CCSP_SUCCESS && param_value != NULL)
+        {
+        sscanf(param_value, "%s",buff);
+        pEntry->Cfg.IdleDisconnectTime = atoi(buff);
+        CcspTraceInfo(("%s %d: from PSM %s = %s\n", __FUNCTION__, __LINE__, param_name, param_value));
+    }
+    else
+    {
+        CcspTraceError(("%s %d: failed to get %s from PSM\n", __FUNCTION__, __LINE__, param_name));
+    }
+
+    /* Get max mru size  */
+    sprintf(param_name, PSM_PPP_MAXMRUSIZE, ulIndex);
+    retPsmGet = PSM_Get_Record_Value2(bus_handle, g_Subsystem, param_name, NULL, &param_value);
+    if (retPsmGet == CCSP_SUCCESS && param_value != NULL)
+            {
+        sscanf(param_value, "%s",buff);
+        pEntry->Cfg.MaxMRUSize = atoi(buff);
+        CcspTraceInfo(("%s %d: from PSM %s = %s\n", __FUNCTION__, __LINE__, param_name, param_value));
+            }
+    else
+    {
+        CcspTraceError(("%s %d: failed to get %s from PSM\n", __FUNCTION__, __LINE__, param_name));
+        }
+
+    /* Get link type */
+    sprintf(param_name,PSM_PPP_LINK_TYPE,ulIndex);
+    retPsmGet = PSM_Get_Record_Value2(bus_handle, g_Subsystem, param_name, NULL, &param_value);
+    if (retPsmGet == CCSP_SUCCESS && param_value != NULL)
+    {
+        if(strcmp(param_value,"PPPoA") == 0)
+        {
+            pEntry->Cfg.LinkType = DML_PPPoA_LINK_TYPE;
+        }
+        else if(strcmp(param_value,"PPPoE") == 0)
+        {
+            pEntry->Cfg.LinkType = DML_PPPoE_LINK_TYPE;
+        }
+
+        CcspTraceInfo(("%s %d: from PSM %s = %s\n", __FUNCTION__, __LINE__, param_name, param_value));
+        }
+    else
+        {
+        CcspTraceError(("%s %d: failed to get %s from PSM\n", __FUNCTION__, __LINE__, param_name));
+        }
+
+    /* Get LowerLayer */
+    sprintf(param_name, PSM_PPP_LOWERLAYERS, ulIndex);
+    retPsmGet = PSM_Get_Record_Value2(bus_handle, g_Subsystem, param_name, NULL, &param_value);
+    if (retPsmGet == CCSP_SUCCESS && param_value != NULL)
+        {
+        strncpy(pEntry->Cfg.LowerLayers, param_value, sizeof(pEntry->Cfg.LowerLayers) - 1);
+        CcspTraceInfo(("%s %d: from PSM %s = %s\n", __FUNCTION__, __LINE__, param_name, param_value));
+        }
+    else
+    {
+        CcspTraceError(("%s %d: failed to get %s from PSM\n", __FUNCTION__, __LINE__, param_name));
+    }
+
+
+    return ANSC_STATUS_SUCCESS;
 }
+
 
 ANSC_STATUS PppMgr_stopPppProcess(pid_t pid)
 {
@@ -560,26 +714,14 @@ ANSC_STATUS PppMgr_stopPppProcess(pid_t pid)
     return ANSC_STATUS_SUCCESS;
 }
 
-pid_t PppMgr_getPppPid()
+ANSC_STATUS PppMgr_stopPppoe(void)
 {
-    char line[64] = { 0 };
-    FILE *command = NULL;
-    pid_t pid = 0;
+    system("/usr/sbin/pppoe-stop");
 
-    command = popen("ps | grep pppd | grep -v grep | tail -1 | awk '{print $1}'","r");
-
-    if(command != NULL)
-    {
-        fgets(line, 64, command);
-
-        pid = strtoul(line, NULL,10);
-
-        pclose(command);
-    }
-    return pid;
+    return ANSC_STATUS_SUCCESS;
 }
 
-ANSC_STATUS DmlPppMgrGetParamValues(char *pComponent, char *pBus, char *pParamName, char *pReturnVal)
+static ANSC_STATUS DmlPppMgrGetParamValues(char *pComponent, char *pBus, char *pParamName, char *pReturnVal)
 {
     CCSP_MESSAGE_BUS_INFO *bus_info = (CCSP_MESSAGE_BUS_INFO *)bus_handle;
     parameterValStruct_t **retVal;
@@ -625,62 +767,6 @@ ANSC_STATUS DmlPppMgrGetParamValues(char *pComponent, char *pBus, char *pParamNa
     return ANSC_STATUS_FAILURE;
 }
 
-ANSC_STATUS DmlPppMgrGetWanMgrInstanceNumber(char *pLowerLayers, INT *piInstanceNumber)
-{
-    char acTmpReturnValue[256] = {0};
-    char acTmpQueryParam[256] = {0};
-    INT iLoopCount;
-    INT iTotalNoofEntries;
-
-    //Validate buffer
-    if ((NULL == pLowerLayers) || (NULL == piInstanceNumber))
-    {
-        CcspTraceError(("%s Invalid Buffer\n", __FUNCTION__));
-        return ANSC_STATUS_FAILURE;
-    }
-
-    //Initialise default value
-    *piInstanceNumber = -1;
-
-    if (ANSC_STATUS_FAILURE == DmlPppMgrGetParamValues(WAN_COMPONENT_NAME, WAN_DBUS_PATH, WAN_NOE_PARAM_NAME, acTmpReturnValue))
-    {
-    CcspTraceError(("%s %d Failed to get param value\n", __FUNCTION__, __LINE__));
-    return ANSC_STATUS_FAILURE;
-    }
-
-    //Total count
-    iTotalNoofEntries = atoi(acTmpReturnValue);
-    CcspTraceInfo(("%s %d - TotalNoofEntries:%d\n", __FUNCTION__, __LINE__, iTotalNoofEntries));
-
-    if (0 >= iTotalNoofEntries)
-    {
-        return ANSC_STATUS_SUCCESS;
-    }
-
-    //Traverse from loop
-    for (iLoopCount = 0; iLoopCount < iTotalNoofEntries; iLoopCount++)
-    {
-        //Query
-        snprintf(acTmpQueryParam, sizeof(acTmpQueryParam), WAN_PHY_PATH_PARAM_NAME, iLoopCount + 1);
-
-        memset(acTmpReturnValue, 0, sizeof(acTmpReturnValue));
-        if (ANSC_STATUS_FAILURE == DmlPppMgrGetParamValues(WAN_COMPONENT_NAME, WAN_DBUS_PATH, acTmpQueryParam, acTmpReturnValue))
-        {
-            CcspTraceError(("%s %d Failed to get param value\n", __FUNCTION__, __LINE__));
-            continue;
-        }
-
-        //Compare name
-        if (0 == strcmp(acTmpReturnValue, pLowerLayers))
-        {
-            *piInstanceNumber = iLoopCount + 1;
-            break;
-        }
-    }
-
-    return ANSC_STATUS_SUCCESS;
-}
-
 ANSC_STATUS DmlWanmanagerSetParamValues(const char *pComponent, const char *pBus,
         const char *pParamName, const char *pParamVal, enum dataType_e type, unsigned int bCommitFlag)
 {
@@ -704,14 +790,14 @@ ANSC_STATUS DmlWanmanagerSetParamValues(const char *pComponent, const char *pBus
             bCommitFlag,
             &faultParam);
 
-    CcspTraceInfo(("Value being set [%d] \n", ret));
 
     if ((ret != CCSP_SUCCESS) && (faultParam != NULL))
     {
-        CcspTraceError(("%s-%d Failed to set %s\n", __FUNCTION__, __LINE__, pParamName));
+        CcspTraceError(("%s-%d Failed to set %s to %s ret = %d\n", __FUNCTION__, __LINE__, pParamName, pParamVal, ret));
         bus_info->freefunc(faultParam);
         return ANSC_STATUS_FAILURE;
     }
+    CcspTraceInfo(("%s %d: successfully set %s to %s\n", __FUNCTION__, __LINE__, pParamName, pParamVal));
 
     return ANSC_STATUS_SUCCESS;
 }
@@ -731,6 +817,30 @@ ULONG GetUptimeinSeconds ()
     }
 
     return UpTime;
+}
+
+#define PPPOE_PROC_FILE "/proc/net/pppoe"
+static int get_session_id_from_proc_entry(ULONG * p_id)
+{
+    FILE * fp;
+    char buf[1024] = {0};
+    if(fp = fopen(PPPOE_PROC_FILE, "r"))
+    {
+        /* Skip first line of /proc/net/pppoe */
+        /* Id Address Device */
+        fgets(buf, sizeof(buf)-1, fp);
+        while(fgets(buf, sizeof(buf)-1, fp))
+        {
+            unsigned long id = 0L;
+            if(sscanf(buf, "%08X", &id) == 1)
+            {
+                *p_id = ntohs(id);
+                CcspTraceInfo(("PPP Session ID: %08X, %d \n", id, *p_id));
+            }
+        }
+        fclose(fp);
+    }
+    return 0;
 }
 
 static int CosaUtilGetIfStats(char *ifname, PDML_IF_STATS pStats)

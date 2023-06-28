@@ -35,14 +35,8 @@
 #ifndef  _PPPMGR_DML_PLUGIN_MAIN_APIS_H_
 #define  _PPPMGR_DML_PLUGIN_MAIN_APIS_H_
 
-#include <stdio.h>
-#include "ansc_debug_wrapper_base.h"
-#include "ansc_common_structures.h"
-#include "ansc_status.h"
-#include "cosa_plugin_api.h" 
-#include "pppmgr_ssp_global.h"
-
-#define  DML_IF_NAME_LENGTH                    512
+#include "pppmgr_global.h"
+#include "pppmgr_dml.h"
 
 typedef  ANSC_HANDLE (*PFN_DM_CREATE) (VOID);
 
@@ -122,5 +116,9 @@ BackEndManagerInitialize (ANSC_HANDLE hThisObject);
 
 ANSC_STATUS
 BackEndManagerRemove (ANSC_HANDLE hThisObject);
+
+DML_PPP_IF_FULL  * PppMgr_GetIfaceData_locked (UINT pppIfaceInstance);
+
+void PppMgr_GetIfaceData_release (DML_PPP_IF_FULL * pPppTable);
 
 #endif

@@ -32,12 +32,13 @@
  * limitations under the License.
  */
 
-#include "pppmgr_dml_plugin_main_apis.h"
+#include "pppmgr_data.h"
 #include "pppmgr_dml_ppp_apis.h"
-#include "pppmgr_ssp_global.h"
+#include "pppmgr_global.h"
 #include "pppmgr_dml.h"
 
 extern void * g_pDslhDmlAgent;
+extern PBACKEND_MANAGER_OBJECT               g_pBEManager;
 
 /**********************************************************************
 
@@ -171,11 +172,6 @@ BackEndManagerInitialize
 
     ANSC_STATUS                     returnStatus = ANSC_STATUS_SUCCESS;
     PBACKEND_MANAGER_OBJECT  pMyObject    = (PBACKEND_MANAGER_OBJECT)hThisObject;
-    PPOAM_IREP_FOLDER_OBJECT        pPoamIrepFoDml     = (PPOAM_IREP_FOLDER_OBJECT)NULL;
-    PPOAM_IREP_FOLDER_OBJECT        pPoamIrepFoPPPIf    = (PPOAM_IREP_FOLDER_OBJECT)NULL;
-    PSLAP_VARIABLE                  pSlapVariable       = (PSLAP_VARIABLE          )NULL;
-    PDML_PPP_IF_FULL           pEntry              = (PDML_PPP_IF_FULL   )NULL;
-    PPPP_IF_LINK_OBJECT       pLinkObj        = (PPPP_IF_LINK_OBJECT)NULL;
     ULONG                           ulEntryCount        = 0;
     ULONG                           ulIndex             = 0;
     ULONG                           ulNextInsNum        = 0;
@@ -194,47 +190,55 @@ BackEndManagerInitialize
     }
 
     /* Initiation Device.PPP.Interface */
+    ulEntryCount = DmlGetTotalNoOfPPPInterfaces(NULL);
 
-    AnscSListInitializeHeader(&pPpp->IfList);
+    ulNextInsNum = 1;
 
-    pPpp->ulIfNextInstance = 1;
-
-    pPpp->hIrepFolderCOSA = g_GetRegistryRootFolder(g_pDslhDmlAgent);
-
-    pPoamIrepFoDml = (PPOAM_IREP_FOLDER_OBJECT)pPpp->hIrepFolderCOSA;
-    if ( !pPoamIrepFoDml )
+    for ( ulIndex = 0; ulIndex < ulEntryCount; ulIndex++ )
     {
-        return ANSC_STATUS_FAILURE;
-    }
+        PppDmlGetIfEntry(NULL, ulIndex, &pPpp->PppTable[ulIndex]);
 
-    pPoamIrepFoPPPIf =
-        (PPOAM_IREP_FOLDER_OBJECT)pPoamIrepFoDml->GetFolder
-        (
-         (ANSC_HANDLE)pPoamIrepFoDml,
-         IREP_FOLDER_NAME_PPPIF
-        );
-
-    if ( !pPoamIrepFoPPPIf )
+        if ( pPpp->PppTable[ulIndex].Cfg.InstanceNumber == 0 )
     {
-        pPoamIrepFoPPPIf =
-            pPoamIrepFoDml->AddFolder
-            (
-             (ANSC_HANDLE)pPoamIrepFoDml,
-             IREP_FOLDER_NAME_PPPIF,
-             0
-            );
-    }
+            pPpp->PppTable[ulIndex].Cfg.InstanceNumber = ulNextInsNum;
 
-    if ( !pPoamIrepFoPPPIf )
-    {
-        return ANSC_STATUS_FAILURE;
+            PppDmlSetIfValues(NULL, ulIndex, ulNextInsNum, pPpp->PppTable[ulIndex].Info.Name);
+
+            ulNextInsNum++;
     }
     else
     {
-        pPpp->hIrepFolderPPPIf = (ANSC_HANDLE)pPoamIrepFoPPPIf;
+            ulNextInsNum = pPpp->PppTable[ulIndex].Cfg.InstanceNumber + 1;
+        }
     }
 
     return returnStatus;
 
 }
+
+DML_PPP_IF_FULL  * PppMgr_GetIfaceData_locked (UINT pppIfaceInstance)
+{
+    if (pppIfaceInstance <= 0 || DmlGetTotalNoOfPPPInterfaces(NULL) < pppIfaceInstance)
+    {
+        return NULL;
+    }
+
+    UINT iface_index = pppIfaceInstance - 1;
+
+    PDATAMODEL_PPP             pMyObject               = (PDATAMODEL_PPP      )g_pBEManager->hPPP;
+    PDML_PPP_IF_FULL           pPppTable                  = (PDML_PPP_IF_FULL    )pMyObject->PppTable;
+
+    pthread_mutex_lock(&pPppTable[iface_index].mDataMutex);
+    return &pPppTable[iface_index];
+}
+
+void PppMgr_GetIfaceData_release (DML_PPP_IF_FULL * pPppTable)
+{
+    if (pPppTable != NULL)
+    {
+        pthread_mutex_unlock(&pPppTable->mDataMutex);
+    }
+}
+
+
 
