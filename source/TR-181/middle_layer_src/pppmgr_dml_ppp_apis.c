@@ -500,15 +500,15 @@ static int PppManager_SetParamFromPSM(PDML_PPP_IF_FULL pEntry)
     memset(param_value, 0, sizeof(param_value));
     memset(param_name, 0, sizeof(param_name));
 
-    sprintf(param_value, "%d", pEntry->Cfg.IdleDisconnectTime);
-    sprintf(param_name, PSM_PPP_IDLETIME, instancenum);
+    snprintf(param_value, sizeof(param_name), "%d", pEntry->Cfg.IdleDisconnectTime);
+    snprintf(param_name, sizeof(param_name), PSM_PPP_IDLETIME, instancenum);
     PppMgr_RdkBus_SetParamValuesToDB(param_name,param_value);
 
     memset(param_value, 0, sizeof(param_value));
     memset(param_name, 0, sizeof(param_name));
 	
-    sprintf(param_value, "%d", pEntry->Cfg.MaxMRUSize);
-    sprintf(param_name, PSM_PPP_MAXMRUSIZE, instancenum);
+    snprintf(param_value, sizeof(param_value), "%d", pEntry->Cfg.MaxMRUSize);
+    snprintf(param_name, sizeof(param_name), PSM_PPP_MAXMRUSIZE, instancenum);
     PppMgr_RdkBus_SetParamValuesToDB(param_name,param_value);
 
     return ANSC_STATUS_SUCCESS;
@@ -585,7 +585,7 @@ PppDmlGetIntfValuesFromPSM
     pthread_mutex_init(&(pEntry->mDataMutex), &(muttex_attr));
 
     /* Get Alias */
-    sprintf(param_name, PSM_PPP_IF_ALIAS, ulIndex);
+    snprintf(param_name, sizeof(param_name), PSM_PPP_IF_ALIAS, ulIndex);
     retPsmGet = PSM_Get_Record_Value2(bus_handle, g_Subsystem, param_name, NULL, &param_value);
     if (retPsmGet == CCSP_SUCCESS && param_value != NULL)
     {
@@ -598,7 +598,7 @@ PppDmlGetIntfValuesFromPSM
     }
 
     /* Get service name */
-    sprintf(param_name, PSM_PPP_IF_SERVICE_NAME,ulIndex);
+    snprintf(param_name, sizeof(param_name), PSM_PPP_IF_SERVICE_NAME,ulIndex);
     retPsmGet = PSM_Get_Record_Value2(bus_handle, g_Subsystem, param_name, NULL, &param_value);
     if (retPsmGet == CCSP_SUCCESS && param_value != NULL)
     {
@@ -611,7 +611,7 @@ PppDmlGetIntfValuesFromPSM
     }
 
     /* Get interface name */
-    sprintf(param_name, PSM_PPP_IF_NAME,ulIndex);
+    snprintf(param_name, sizeof(param_name), PSM_PPP_IF_NAME,ulIndex);
     retPsmGet = PSM_Get_Record_Value2(bus_handle, g_Subsystem, param_name, NULL, &param_value);
     if (retPsmGet == CCSP_SUCCESS && param_value != NULL)
         {
@@ -624,7 +624,7 @@ PppDmlGetIntfValuesFromPSM
         }
 
     /* Get authentication protocol */
-    sprintf(param_name, PSM_PPP_AUTH_PROTOCOL,ulIndex);
+    snprintf(param_name, sizeof(param_name), PSM_PPP_AUTH_PROTOCOL,ulIndex);
     retPsmGet = PSM_Get_Record_Value2(bus_handle, g_Subsystem, param_name, NULL, &param_value);
     if (retPsmGet == CCSP_SUCCESS && param_value != NULL)
     {
@@ -640,7 +640,7 @@ PppDmlGetIntfValuesFromPSM
     }
 
     /* Get last connection error */
-    sprintf(param_name, PSM_PPP_LAST_COONECTION_ERROR,ulIndex);
+    snprintf(param_name, sizeof(param_name), PSM_PPP_LAST_COONECTION_ERROR,ulIndex);
     retPsmGet = PSM_Get_Record_Value2(bus_handle, g_Subsystem, param_name, NULL, &param_value);
     if (retPsmGet == CCSP_SUCCESS && param_value != NULL)
     {
@@ -656,7 +656,7 @@ PppDmlGetIntfValuesFromPSM
         }
 
     /* Get idle time  */
-    sprintf(param_name, PSM_PPP_IDLETIME, ulIndex);
+    snprintf(param_name, sizeof(param_name), PSM_PPP_IDLETIME, ulIndex);
     retPsmGet = PSM_Get_Record_Value2(bus_handle, g_Subsystem, param_name, NULL, &param_value);
     if (retPsmGet == CCSP_SUCCESS && param_value != NULL)
         {
@@ -670,7 +670,7 @@ PppDmlGetIntfValuesFromPSM
     }
 
     /* Get max mru size  */
-    sprintf(param_name, PSM_PPP_MAXMRUSIZE, ulIndex);
+    snprintf(param_name, sizeof(param_name), PSM_PPP_MAXMRUSIZE, ulIndex);
     retPsmGet = PSM_Get_Record_Value2(bus_handle, g_Subsystem, param_name, NULL, &param_value);
     if (retPsmGet == CCSP_SUCCESS && param_value != NULL)
             {
@@ -684,7 +684,7 @@ PppDmlGetIntfValuesFromPSM
         }
 
     /* Get link type */
-    sprintf(param_name,PSM_PPP_LINK_TYPE,ulIndex);
+    snprintf(param_name, sizeof(param_name), PSM_PPP_LINK_TYPE,ulIndex);
     retPsmGet = PSM_Get_Record_Value2(bus_handle, g_Subsystem, param_name, NULL, &param_value);
     if (retPsmGet == CCSP_SUCCESS && param_value != NULL)
     {
@@ -705,7 +705,7 @@ PppDmlGetIntfValuesFromPSM
         }
 
     /* Get LowerLayer */
-    sprintf(param_name, PSM_PPP_LOWERLAYERS, ulIndex);
+    snprintf(param_name, sizeof(param_name), PSM_PPP_LOWERLAYERS, ulIndex);
     retPsmGet = PSM_Get_Record_Value2(bus_handle, g_Subsystem, param_name, NULL, &param_value);
     if (retPsmGet == CCSP_SUCCESS && param_value != NULL)
         {

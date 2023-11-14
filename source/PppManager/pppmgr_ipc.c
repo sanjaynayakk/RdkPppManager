@@ -450,7 +450,8 @@ static ANSC_STATUS PppMgr_DmlSetVendorParams(char *invendormsg , int *SRU , int 
                 offset = groupArray[g].rm_eo;
 
             char cursorCopy[strlen(cursor) + 1];
-            strcpy(cursorCopy, cursor);
+            memset(cursorCopy, 0, sizeof(cursorCopy)); 
+            strncpy(cursorCopy, cursor, sizeof(cursorCopy) - 1);
             cursorCopy[groupArray[g].rm_eo] = 0;
             char *ret;
             if(ret = strstr(cursorCopy + groupArray[g].rm_so, "SRU="))

@@ -324,7 +324,7 @@ void PppMgr_GenerateDuidFile (char *wanName)
         CcspTraceInfo(("%s %d: created directory %s\n", __FUNCTION__, __LINE__, file_path));
     }
 
-    strcat (file_path, DHCPV6_DUID_FILE);
+    strncat (file_path, DHCPV6_DUID_FILE, sizeof(file_path) - strlen(file_path) - 1);
 
     // wite duid in duid-client file
     FILE * fp_duid = fopen(file_path, "w");
