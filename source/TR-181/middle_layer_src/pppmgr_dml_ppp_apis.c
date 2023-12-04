@@ -43,11 +43,6 @@
 #define PPP_LCPEcho 30
 #define PPP_LCPEchoRetry 3
 
-#ifdef USE_PPP_DAEMON
-#define PPPoE_LIB "/usr/lib/pppd/2.4.9/rp-pppoe.so"
-#define PPPoA_LIB "/usr/lib/pppd/2.4.9/pppoatm.so"
-#endif
-
 static int CosaUtilGetIfStats(char *ifname, PDML_IF_STATS pStats);
 extern char g_Subsystem[32];
 extern ANSC_HANDLE bus_handle;
@@ -165,7 +160,6 @@ ANSC_STATUS PppMgr_SendPppdStartEventToQ (UINT InstanceNumber)
         PppMgr_GetIfaceData_release(pEntry);
         return ANSC_STATUS_SUCCESS;
     }
-
     return ANSC_STATUS_FAILURE;
 }
 
@@ -265,12 +259,13 @@ static int PppMgr_GetWanIfaceInstance (UINT InstanceNumber, int * WanIfaceInstan
 
 }
 
+
 ANSC_STATUS
 PppMgr_StartPppClient (UINT InstanceNumber)
 {
     int ret ;
     PDML_PPP_IF_FULL  pEntry = NULL;
-    char auth_proto[64] = { 0 };
+    char auth_proto[8] = { 0 };
     char VLANInterfaceName[32] = { 0 };
     char command[1024] = { 0 };
     char config_command[1024] = { 0 };
@@ -309,29 +304,24 @@ PppMgr_StartPppClient (UINT InstanceNumber)
             return ANSC_STATUS_FAILURE;
         }
 
-        switch (pEntry->Info.AuthenticationProtocol)
-        {
-            case DML_PPP_AUTH_PAP:
-                snprintf(auth_proto, sizeof(auth_proto), " require-pap refuse-chap refuse-mschap noauth");
-                break;
-            case DML_PPP_AUTH_CHAP:
-                snprintf(auth_proto, sizeof(auth_proto), " require-chap refuse-pap refuse-mschap noauth");
-                break;
-            case DML_PPP_AUTH_MS_CHAP:
-                snprintf(auth_proto, sizeof(auth_proto), " require-mschap refuse-pap refuse-chap noauth");
-                break;
-            default:
-                break;
-        }
+            if((pEntry->Info.AuthenticationProtocol == DML_PPP_AUTH_CHAP) ||
+                    (pEntry->Info.AuthenticationProtocol ==  DML_PPP_AUTH_PAP))
+            {
+                sprintf(auth_proto,"0");
+            }
+            else
+            {
+                /* support for mschap */
+                sprintf(auth_proto,"4");
+            }
 
             if(pEntry->Cfg.LinkType == DML_PPPoA_LINK_TYPE)
             {
                 CcspTraceInfo(("%s %d: PPPoA_LINK_TYPE: constructing arguments\n", __FUNCTION__, __LINE__));
 #ifdef USE_PPP_DAEMON
-                snprintf(command, sizeof(command),
-                    "pppd nodetach plugin %s %s user %s password %s nodeflate %s +ipv6 usepeerdns ifname %s persist &",
-                    PPPoA_LIB, pEntry->Info.InterfaceServiceName, pEntry->Cfg.Username,
-                    pEntry->Cfg.Password, auth_proto, pEntry->Cfg.Alias);
+                snprintf(command, sizeof(command), "pppd -6 -c %s -a %s -u %s -p %s -f %s &",
+                        pEntry->Info.Name, pEntry->Info.InterfaceServiceName, pEntry->Cfg.Username,
+                        pEntry->Cfg.Password, auth_proto);
 #else
                 /* Assume a default rp-pppoe config exist. Update rp-pppoe configuration */
                 ret =  snprintf(config_command, sizeof(config_command), "pppoe_config.sh %s %s %s %s PPPoA %d %d",
@@ -352,9 +342,8 @@ PppMgr_StartPppClient (UINT InstanceNumber)
             {
                 CcspTraceInfo(("%s %d: PPPoE_LINK_TYPE: constructing arguments\n", __FUNCTION__, __LINE__));
 #ifdef USE_PPP_DAEMON
-                snprintf(command, sizeof(command),
-                    "pppd nodetach plugin %s %s user %s password %s nodeflate %s +ipv6 usepeerdns ifname %s persist &",
-                     PPPoE_LIB, PPPoE_VLAN_IF_NAME, pEntry->Cfg.Username, pEntry->Cfg.Password, auth_proto, pEntry->Cfg.Alias);
+                snprintf(command, sizeof(command), "pppd -6 -c %s -i %s -u %s -p %s -f %s &",
+                        pEntry->Info.Name, PPPoE_VLAN_IF_NAME, pEntry->Cfg.Username, pEntry->Cfg.Password, auth_proto);
 #else
                 ret = snprintf(acTmpQueryParam, sizeof(acTmpQueryParam),"%s.%s",pEntry->Cfg.LowerLayers,"Name");
                 if(ret > 0 && ret <= sizeof(config_command))
