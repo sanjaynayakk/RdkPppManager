@@ -279,7 +279,6 @@ void PppMgr_GenerateDuidFile (char *wanName)
         if(fd == NULL)
         {
             CcspTraceError(("%s %d: Failed to ger uuid entry\n", __FUNCTION__, __LINE__));
-            pclose(fd);
             return;
         }
 
