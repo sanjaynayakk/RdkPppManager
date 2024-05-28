@@ -1,11 +1,5 @@
 ##########################################################################
 # Copyright (C) 2020 Sky
-#------------------------------------------------------------------------
-# THIS SOFTWARE CONTRIBUTION IS PROVIDED ON BEHALF OF SKY PLC.
-# BY THE CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLU
-# BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNES
-# A PARTICULAR PURPOSE ARE DISCLAIMED
-# ******************************************************************
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
