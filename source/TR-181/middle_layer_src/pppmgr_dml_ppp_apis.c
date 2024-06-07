@@ -592,6 +592,7 @@ PppDmlGetIntfValuesFromPSM
 
     // init mutex
     pthread_mutexattr_t     muttex_attr;
+    memset(&muttex_attr, 0, sizeof(pthread_mutexattr_t));
     pthread_mutexattr_settype(&muttex_attr, PTHREAD_MUTEX_RECURSIVE);
     pthread_mutex_init(&(pEntry->mDataMutex), &(muttex_attr));
 
