@@ -369,7 +369,7 @@ PppMgr_StartPppClient (UINT InstanceNumber)
 
                 /* Assume a defule rp-pppoe config exist. Update rp-pppoe configuration */
                 ret = snprintf(config_command, sizeof(config_command), "pppoe_config.sh '%s' '%s' %s %s PPPoE %d %d %d ",
-                        pEntry->Cfg.Username, pEntry->Cfg.Password, PPPoE_VLAN_IF_NAME, pEntry->Info.Name, pEntry->Info.LCPEcho , pEntry->Info.LCPEchoRetry,pEntry->Cfg.MaxMRUSize);
+                        pEntry->Cfg.Username, pEntry->Cfg.Password, VLANInterfaceName, pEntry->Info.Name, pEntry->Info.LCPEcho , pEntry->Info.LCPEchoRetry,pEntry->Cfg.MaxMRUSize);
                 if(ret > 0 && ret <= sizeof(config_command))
                 {
                     system(config_command);
