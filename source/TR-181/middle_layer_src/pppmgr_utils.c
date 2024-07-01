@@ -106,7 +106,6 @@ PppGetIfAddr
 
 ULONG get_ppp_ip_addr(void)
 {
-    ULONG addr       = 0;
     wanProto_t proto = 0;
     char buf[128]    = {0};
 
@@ -145,7 +144,7 @@ int get_session_id(ULONG * p_id, ANSC_HANDLE hContext)
 
     if(pEntry->Cfg.LinkType == DML_PPPoE_LINK_TYPE)
     {
-        if(fp = fopen(PPPOE_PROC_FILE, "r"))
+        if((fp = fopen(PPPOE_PROC_FILE, "r")))
         {
            /* Skip first line of /proc/net/pppoe */
            /* Id Address Device */
@@ -157,10 +156,10 @@ int get_session_id(ULONG * p_id, ANSC_HANDLE hContext)
               if(strstr(buf, "Id") )
                  continue;
 
-              if(sscanf(buf, "%08X", &id) == 1)
+              if(sscanf(buf, "%08lX", &id) == 1)
               {
                  *p_id = ntohs(id);
-                 CcspTraceInfo(("PPP Session ID: %08X, %d \n", id, *p_id));
+                 CcspTraceInfo(("PPP Session ID: %08lX, %ld \n", id, *p_id));
               }
            }
            fclose(fp);
@@ -175,7 +174,7 @@ int get_session_id(ULONG * p_id, ANSC_HANDLE hContext)
         if (!get_ppp_ip_addr())
             return 0;
 
-        if (fp = fopen(LOG_FILE, "r+"))
+        if ((fp = fopen(LOG_FILE, "r+")))
         {
             while (fgets(buf, sizeof(buf)-1, fp))
             {
@@ -216,7 +215,7 @@ int get_auth_proto(int * p_proto)
     char buf[1024] = {0};
     char result[1024] = {0};
 
-    if (fp = fopen(LOG_FILE, "r+"))
+    if ((fp = fopen(LOG_FILE, "r+")))
     {
         while (fgets(buf, sizeof(buf)-1, fp))
         {
