@@ -311,9 +311,11 @@ PppMgr_StartPppClient (UINT InstanceNumber)
 
         pEntry->Info.pppPid = 0;
 
+#ifndef PPP_USERNAME_PASSWORD_FROM_PSM
         // get UserName & Password from hal
         platform_hal_GetPppUserName (pEntry->Cfg.Username, sizeof(pEntry->Cfg.Username));
         platform_hal_GetPppPassword (pEntry->Cfg.Password, sizeof(pEntry->Cfg.Password));
+#endif
 
         if((strlen(pEntry->Info.Name) == 0) || (strlen(pEntry->Info.InterfaceServiceName) == 0) ||
                 (strlen(pEntry->Cfg.Username) == 0) || (strlen(pEntry->Cfg.Password) == 0) ||
@@ -537,6 +539,22 @@ static int PppManager_SetParamFromPSM(PDML_PPP_IF_FULL pEntry)
     snprintf(param_name, sizeof(param_name), PSM_PPP_MAXMRUSIZE, instancenum);
     PppMgr_RdkBus_SetParamValuesToDB(param_name,param_value);
 
+#ifdef PPP_USERNAME_PASSWORD_FROM_PSM
+    memset(param_value, 0, sizeof(param_value));
+    memset(param_name, 0, sizeof(param_name));
+
+    snprintf(param_value, sizeof(param_value), "%s", pEntry->Cfg.Username);
+    snprintf(param_name, sizeof(param_name), PSM_PPP_USERNAME, instancenum);
+    PppMgr_RdkBus_SetParamValuesToDB(param_name,param_value);
+
+    memset(param_value, 0, sizeof(param_value));
+    memset(param_name, 0, sizeof(param_name));
+
+    snprintf(param_value, sizeof(param_value), "%s", pEntry->Cfg.Password);
+    snprintf(param_name, sizeof(param_name), PSM_PPP_PASSWORD, instancenum);
+    PppMgr_RdkBus_SetParamValuesToDB(param_name,param_value);
+#endif
+
     return ANSC_STATUS_SUCCESS;
 }
 
@@ -744,6 +762,33 @@ PppDmlGetIntfValuesFromPSM
         CcspTraceError(("%s %d: failed to get %s from PSM\n", __FUNCTION__, __LINE__, param_name));
     }
 
+#ifdef PPP_USERNAME_PASSWORD_FROM_PSM
+    /* Get Username */
+    snprintf(param_name, sizeof(param_name), PSM_PPP_USERNAME, ulIndex);
+    retPsmGet = PSM_Get_Record_Value2(bus_handle, g_Subsystem, param_name, NULL, &param_value);
+    if (retPsmGet == CCSP_SUCCESS && param_value != NULL)
+        {
+        strncpy(pEntry->Cfg.Username, param_value, sizeof(pEntry->Cfg.Username) - 1);
+        CcspTraceInfo(("%s %d: from PSM %s = %s\n", __FUNCTION__, __LINE__, param_name, param_value));
+        }
+    else
+    {
+        CcspTraceError(("%s %d: failed to get %s from PSM\n", __FUNCTION__, __LINE__, param_name));
+    }
+
+    /* Get Password */
+    snprintf(param_name, sizeof(param_name), PSM_PPP_PASSWORD, ulIndex);
+    retPsmGet = PSM_Get_Record_Value2(bus_handle, g_Subsystem, param_name, NULL, &param_value);
+    if (retPsmGet == CCSP_SUCCESS && param_value != NULL)
+        {
+        strncpy(pEntry->Cfg.Password, param_value, sizeof(pEntry->Cfg.Password) - 1);
+        CcspTraceInfo(("%s %d: from PSM %s = %s\n", __FUNCTION__, __LINE__, param_name, param_value));
+        }
+    else
+    {
+        CcspTraceError(("%s %d: failed to get %s from PSM\n", __FUNCTION__, __LINE__, param_name));
+    }
+#endif
 
     return ANSC_STATUS_SUCCESS;
 }

@@ -44,13 +44,18 @@
 #define PSM_PPPMANAGER_PPPIFCOUNT     "dmsb.pppmanager.pppifcount"
 #define PSM_PPP_IF_SERVICE_NAME       "dmsb.pppmanager.if.%d.ServiceName"
 #define PSM_PPP_IF_NAME               "dmsb.pppmanager.if.%d.Name"
-#define PSM_PPP_IF_ALIAS               "dmsb.pppmanager.if.%d.Alias"
+#define PSM_PPP_IF_ALIAS              "dmsb.pppmanager.if.%d.Alias"
 #define PSM_PPP_AUTH_PROTOCOL         "dmsb.pppmanager.if.%d.AuthenticationProtocol"
 #define PSM_PPP_LAST_COONECTION_ERROR "dmsb.pppmanager.if.%d.lastconnectionerror"
 #define PSM_PPP_IDLETIME              "dmsb.pppmanager.if.%d.idletime"
 #define PSM_PPP_MAXMRUSIZE            "dmsb.pppmanager.if.%d.maxmrusize"
 #define PSM_PPP_LINK_TYPE             "dmsb.pppmanager.if.%d.linktype"
 #define PSM_PPP_LOWERLAYERS           "dmsb.pppmanager.if.%d.LowerLayer"
+
+#ifdef PPP_USERNAME_PASSWORD_FROM_PSM
+#define PSM_PPP_USERNAME              "dmsb.pppmanager.if.%ld.username"
+#define PSM_PPP_PASSWORD              "dmsb.pppmanager.if.%ld.password"
+#endif
 
 #define  ACCESS_PPP_IF_LINK_OBJECT(p)              \
     ACCESS_CONTAINER(p, PPP_IF_LINK_OBJECT, Linkage)
