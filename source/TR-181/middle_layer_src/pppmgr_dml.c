@@ -626,8 +626,6 @@ Interface_GetParamUlongValue
     if( AnscEqualString(ParamName, "MaxMRUSize", TRUE))
     {
         /* collect value */
-        syscfg_get(NULL, "MaxMRUSize",buff, sizeof(buff));
-        pEntry->Cfg.MaxMRUSize = atoi(buff);
         *puLong = pEntry->Cfg.MaxMRUSize;
 
         retStatus = TRUE;
@@ -1012,9 +1010,6 @@ Interface_SetParamUlongValue
         retStatus = FALSE;
 #else
         pEntry->Cfg.MaxMRUSize = uValue;
-        snprintf(buf,sizeof(buf),"%d",uValue);
-        set_syscfg(buf,"MaxMRUSize");
-
         retStatus = TRUE;
 #endif
     }
