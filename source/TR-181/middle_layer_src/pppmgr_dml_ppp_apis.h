@@ -82,6 +82,7 @@
 #define WAN_NOE_PARAM_NAME    "Device.X_RDK_WanManager.InterfaceNumberOfEntries"
 #define WAN_PHY_PATH_PARAM_NAME    "Device.X_RDK_WanManager.Interface.%d.BaseInterface"
 #define WAN_IFACE_NAME             "Device.X_RDK_WanManager.Interface.%d.VirtualInterface.1.Name"
+#define WAN_INTERFACE_SELECTION_STATUS  "Device.X_RDK_WanManager.Interface.%d.Selection.Status"
 #else
 #define PPP_LCP_STATUS_PARAM_NAME    "Device.X_RDK_WanManager.CPEInterface.%d.PPP.LCPStatus"
 #define PPP_LINK_STATUS_PARAM_NAME    "Device.X_RDK_WanManager.CPEInterface.%d.PPP.LinkStatus"
