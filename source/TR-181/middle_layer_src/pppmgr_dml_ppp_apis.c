@@ -138,7 +138,6 @@ PPPDmlGetIfInfo
     pInfo->LCPEchoRetry = PPP_LCPEchoRetry;
     pInfo->LCPEcho      = PPP_LCPEcho;
 
-    pInfo->SessionID    = 0;
     get_session_id(&pInfo->SessionID, hContext);
 
     return ANSC_STATUS_SUCCESS;
@@ -292,6 +291,9 @@ PppMgr_StartPppClient (UINT InstanceNumber)
     char acTmpQueryParam[256] = {0};
     int WanIfaceInstance  = -1;
     int WanVirtIfaceInstance  = -1;
+    char padt_command[1024] = { 0 };
+    FILE * fp;
+    char ppp_mac_addr[256] = {0};
 
     PppMgr_GetWanIfaceInstance(InstanceNumber, &WanIfaceInstance, &WanVirtIfaceInstance);
     if ((WanIfaceInstance == -1) || (WanVirtIfaceInstance == -1))
@@ -390,6 +392,28 @@ PppMgr_StartPppClient (UINT InstanceNumber)
                 if(ret > 0 && ret <= sizeof(config_command))
                 {
                     system(config_command);
+                }
+
+                /* Get previous ppp session details */
+                if(fp = fopen("/nvram/last_ppp_session", "r"))
+                {
+                    fscanf(fp,"%s", ppp_mac_addr);
+
+                    /* Send PADT for previous ppp session */
+                    ret = snprintf(padt_command, sizeof(padt_command), "pppoe -I %s -e %d:%s -k", VLANInterfaceName, pEntry->Info.SessionID, ppp_mac_addr);
+                    CcspTraceInfo((" PADT command : pppoe -I %s -e %d:%s -k\n",VLANInterfaceName, pEntry->Info.SessionID, ppp_mac_addr));
+
+                    if(ret > 0 && ret <= sizeof(padt_command))
+                    {
+                        system(padt_command);
+                        CcspTraceInfo((" Successfully sent PADT for previous ppp session \n"));
+                    }
+
+                    fclose(fp);
+                }
+                else
+                {
+                    CcspTraceInfo(("Failed to read previous ppp session details \n"));
                 }
 
                 /* start rp-pppoe */
@@ -789,6 +813,15 @@ PppDmlGetIntfValuesFromPSM
         CcspTraceError(("%s %d: failed to get %s from PSM\n", __FUNCTION__, __LINE__, param_name));
     }
 #endif
+
+    /* Get the SessionID */
+    sprintf(param_name, PSM_PPP_SESSIONID,ulIndex);
+    retPsmGet = PSM_Get_Record_Value2(bus_handle, g_Subsystem, param_name, NULL, &param_value);
+    if (retPsmGet == CCSP_SUCCESS && param_value != NULL)
+    {
+        sscanf(param_value, "%ld", &pEntry->Info.SessionID);
+        CcspTraceInfo(("%s %d Getting SessionID from PSM: %ld \n", __FUNCTION__, __LINE__, pEntry->Info.SessionID));
+    }
 
     return ANSC_STATUS_SUCCESS;
 }

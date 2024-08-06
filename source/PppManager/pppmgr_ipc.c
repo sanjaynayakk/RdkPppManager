@@ -480,7 +480,7 @@ static ANSC_STATUS PppMgr_ProcessStateChangedMsg(int InstanceNumber, ipc_ppp_eve
     char WanPppLinkStatus[64] = { 0 };
     uint32_t updatedParam = 0;
     int ret = 0;
-
+    char paramValue[256]   = {0};
 
     if(InstanceNumber <= 0 )
     {
@@ -527,6 +527,11 @@ static ANSC_STATUS PppMgr_ProcessStateChangedMsg(int InstanceNumber, ipc_ppp_eve
                 snprintf(WanPppLinkStatus, sizeof(WanPppLinkStatus), UP);
                 updatedParam = 1;
                 pEntry->Info.LastChange = GetUptimeinSeconds();
+
+                CcspTraceInfo(("[%s-%d] Updating SessionID to PSM : %ld\n", __FUNCTION__, __LINE__, pEntry->Info.SessionID));
+                get_session_id(&pEntry->Info.SessionID, pEntry);
+                sprintf(paramValue, "%d", pEntry->Info.SessionID);
+                PppMgr_RdkBus_SetParamValuesToDB(PSM_PPP_SESSIONID, paramValue);
                 break;
 
             case PPP_INTERFACE_DISCONNECTING:

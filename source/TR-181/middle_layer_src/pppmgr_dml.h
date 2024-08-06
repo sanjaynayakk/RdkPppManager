@@ -51,6 +51,7 @@
 #define PSM_PPP_MAXMRUSIZE            "dmsb.pppmanager.if.%d.maxmrusize"
 #define PSM_PPP_LINK_TYPE             "dmsb.pppmanager.if.%d.linktype"
 #define PSM_PPP_LOWERLAYERS           "dmsb.pppmanager.if.%d.LowerLayer"
+#define PSM_PPP_SESSIONID             "dmsb.pppmanager.if.%d.sessionid"
 
 #ifdef PPP_USERNAME_PASSWORD_FROM_PSM
 #define PSM_PPP_USERNAME              "dmsb.pppmanager.if.%ld.username"
