@@ -38,6 +38,7 @@
 #include "pppmgr_dml.h"
 #include <regex.h>
 
+#define NET_EXT_STATS_FILE "/proc/net/dev_extstats"
 #define NET_STATS_FILE "/proc/net/dev"
 #define PPPoE_VLAN_IF_NAME  "vlan101"
 #define PPP_LCPEcho 30
@@ -933,44 +934,100 @@ static int get_session_id_from_proc_entry(ULONG * p_id)
 
 static int CosaUtilGetIfStats(char *ifname, PDML_IF_STATS pStats)
 {
-    int    i;
-    FILE *fp;
+    FILE * fp = NULL;
     char buf[1024] = {0} ;
-    char *p;
-    int    ret = 0;
+    char *tok, *delim = ": \t\r\n", *sp = NULL, *ptr = NULL;
+    int idx = 0, ret = 0;;
 
-    if (ifname == NULL)
+    if(ifname == NULL  || pStats == NULL )
         return -1;
 
-    fp = fopen(NET_STATS_FILE, "r");
+    // check if dev_extstats exists in platform
+    fp = fopen(NET_EXT_STATS_FILE, "r");
 
-    if(fp)
+    if(fp == NULL)
     {
-        i = 0;
-        while(fgets(buf, sizeof(buf), fp))
-        {
-            if(++i <= 2)
-                continue;
-            if(p = strchr(buf, ':'))
-            {
-                if(strstr(buf, ifname))
-                {
-                    memset(pStats, 0, sizeof(*pStats));
-                    if (sscanf(p+1, "%d %d %d %d %*d %*d %*d %*d %d %d %d %d %*d %*d %*d %*d",
-                    &pStats->BytesReceived, &pStats->PacketsReceived, &pStats->ErrorsReceived,
-                    &pStats->DiscardPacketsReceived,&pStats->BytesSent, &pStats->PacketsSent,
-                    &pStats->ErrorsSent, &pStats->DiscardPacketsSent) == 8)
-                    {
-                        ret = 1;
-                        break;
-                    }
-                }
-            }
-        }
+        fp = fopen(NET_STATS_FILE, "r");
+        // both files are not present . Return error
+        if(fp == NULL)
+            return -1;
     }
 
-    if (fp != NULL)
+    // skip first row
+    if (fgets(buf, sizeof(buf), fp) == NULL)
+    {
         fclose(fp);
+        return -1;
+    }
+
+    while (fgets(buf, sizeof(buf), fp) != NULL)
+    {
+        if(ifname[0] == '\0')
+            break;
+
+        if ((strstr(buf, (char *)ifname) == NULL))
+            continue;
+        // found an interface entry in /proc/net/dev_extstats or /proc/net/dev
+        // fetch all statistics by iterating each column using delim
+
+        for (idx = 1, ptr = buf; (tok = strtok_r(ptr, delim, &sp)) != NULL; idx++)
+        {
+            ptr = NULL;
+            switch (idx)
+            {
+                case 2:
+                    pStats->BytesReceived = (ULONG)atoll(tok);
+                    break;
+                case 3:
+                    pStats->PacketsReceived = (ULONG)atoll(tok);
+                    break;
+                case 4:
+                    pStats->ErrorsReceived = (ULONG)atoll(tok);
+                    break;
+                case 5:
+                    pStats->DiscardPacketsReceived = (ULONG)atoll(tok);
+                    break;
+                case 10:
+                    pStats->BytesSent = (ULONG)atoll(tok);
+                    break;
+                case 11:
+                    pStats->PacketsSent = (ULONG)atoll(tok);
+                    break;
+                case 12:
+                    pStats->ErrorsSent = (ULONG)atoll(tok);
+                    break;
+                case 13:
+                    pStats->DiscardPacketsSent =  (ULONG)atoll(tok);
+                    break;
+                case 9:
+                    pStats->MulticastPacketsReceived = (ULONG)atoll(tok);
+                    break;
+                case 18:
+                    pStats->MulticastPacketsSent = (ULONG)atoll(tok);
+                    break;
+                case 21:
+                    pStats->UnicastPacketsReceived = (ULONG)atoll(tok);
+                    break;
+                case 22:
+                    pStats->UnicastPacketsSent = (ULONG)atoll(tok);
+                    break;
+                case 23:
+                    pStats->BroadcastPacketsReceived = (ULONG)atoll(tok);
+                    break;
+                case 24:
+                    pStats->BroadcastPacketsSent = (ULONG)atoll(tok);
+                    break;
+                case 25:
+                    pStats->UnknownProtoPacketsReceived = (ULONG)atoll(tok);
+                    break;
+                default:
+                    break;
+            }
+        } // for
+        ret = TRUE;
+        break;
+    }// while
+    fclose(fp);
 
     return ret;
 }

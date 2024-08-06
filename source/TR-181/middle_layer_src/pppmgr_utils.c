@@ -44,7 +44,6 @@ extern char g_Subsystem[32];
 extern int sysevent_fd;
 extern token_t sysevent_token;
 
-#define NET_STATS_FILE "/proc/net/dev"
 #define SYSEVENT_PPP_STATUS "ppp_status"
 #define PPPOE_PROC_FILE "/proc/net/pppoe"
 #define GET_PPPID_ATTEMPT    5
