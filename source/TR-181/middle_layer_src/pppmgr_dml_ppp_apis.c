@@ -810,10 +810,10 @@ ANSC_STATUS PppMgr_stopPppoe(void)
 
 ANSC_STATUS DmlPppMgrGetParamValues(char *pComponent, char *pBus, char *pParamName, char *pReturnVal)
 {
-    parameterValStruct_t **retVal;
+    parameterValStruct_t **retVal = NULL;
     char *ParamName[1];
     int ret = 0,
-        nval;
+        nval = 0;
 
     //Assign address for get parameter name
     ParamName[0] = pParamName;
