@@ -41,6 +41,7 @@
 #include "pppmgr_dml.h"
 #include <ipc_msg.h> 
 #include "pppmgr_dml_ppp_apis.h"
+#include "syscfg.h"
 
 #define PPP_MGR_IPC_SERVER    1
 #define PROC_UUID_PATH        "/proc/sys/kernel/random/uuid"
@@ -64,7 +65,6 @@ static ANSC_STATUS PppMgr_createIpcSockFd( int32_t  *sockFd, uint32_t sockMode);
 static ANSC_STATUS  PppMgr_bindIpcSocket( int32_t sockFd);
 static void* PppMgr_EventHandlerThread( void *arg );
 static ANSC_STATUS PppMgr_IpcServerInit();
-static PSINGLE_LINK_ENTRY PppMgr_DmlGetLinkEntry(pid_t pid, char *interface);
 static ANSC_STATUS PppMgr_DmlSetIp4Param (char * ipbuff, char * ipCharArr);
 static ANSC_STATUS PppMgr_ProcessStateChangedMsg(int InstanceNumber, ipc_ppp_event_msg_t pppEventMsg);
 static ANSC_STATUS PppMgr_receiveIpcSocket(int32_t sockFd, char *msg, uint32_t *msgLen);
@@ -110,7 +110,7 @@ ANSC_STATUS PppMgr_SendDataToQ (PPPEventQData * pEventData)
 {
     if (pEventData == NULL)
     {
-        CcspTraceError(("%s %d: invalid args\n"));
+        CcspTraceError(("%s %d: invalid args\n", __FUNCTION__, __LINE__));
         return ANSC_STATUS_FAILURE;
     }
 
@@ -454,11 +454,11 @@ static ANSC_STATUS PppMgr_DmlSetVendorParams(char *invendormsg , int *SRU , int 
             strncpy(cursorCopy, cursor, sizeof(cursorCopy) - 1);
             cursorCopy[groupArray[g].rm_eo] = 0;
             char *ret;
-            if(ret = strstr(cursorCopy + groupArray[g].rm_so, "SRU="))
+            if((ret = strstr(cursorCopy + groupArray[g].rm_so, "SRU=")))
             {
                 *SRU = atoi(ret+4);
             }
-            else if(ret = strstr(cursorCopy + groupArray[g].rm_so, "SRD="))
+            else if((ret = strstr(cursorCopy + groupArray[g].rm_so, "SRD=")))
             {
                 *SRD = atoi(ret+4);
             }
@@ -656,7 +656,6 @@ static ANSC_STATUS PppMgr_ProcessIpcpParams(int InstanceNumber, ipc_ppp_event_ms
 
     int ret = 0;
     char *s1 = NULL;
-    char *s2 = NULL;
     int i = 0;
     char dns1[32] = { 0 };
     char dns2[32] = { 0 };
@@ -783,9 +782,6 @@ Decription: This API will set IPV6 parameters to PPP data model
 -----------------------------------------------------------------------*/
 static ANSC_STATUS PppMgr_ProcessIpv6cpParams(int InstanceNumber, ipc_ppp_event_msg_t pppEventMsg)
 {
-    uint32_t updated_params = 0;
-
-
     CcspTraceInfo(("[%s-%d] - instance number %d\n", __FUNCTION__, __LINE__, InstanceNumber));
 
     if(InstanceNumber <= 0 )
@@ -862,7 +858,6 @@ static ANSC_STATUS PppMgr_ProcessPppState(ipc_msg_payload_t ipcMsg)
 {
 
     ANSC_STATUS retStatus = ANSC_STATUS_SUCCESS;
-    uint32_t getAttempt = 0;
 
     if( ipcMsg.msg_type != IPC_MSG_PPP_STATE_CHANGE )
     {
@@ -1008,7 +1003,6 @@ static void* PppMgr_EventHandlerThread( void *arg )
     // local variables
     BOOL bRunning = TRUE;
 
-    int bytesReceived = 0;
     ipc_msg_payload_t sockMsg;
     int msgSize = 0;; 
 
@@ -1040,7 +1034,7 @@ static void* PppMgr_EventHandlerThread( void *arg )
         memset (&sockMsg, 0, sizeof(ipc_msg_payload_t));
         memset (&eventMsg, 0, sizeof(PPPEventQData));
 
-        PppMgr_receiveIpcSocket(ipcListenFd, (char*)&sockMsg, &msgSize);
+        PppMgr_receiveIpcSocket(ipcListenFd, (char*)&sockMsg, (uint32_t *)&msgSize);
 
         if(msgSize > 0)
         {
@@ -1071,9 +1065,6 @@ Decription: This API will create and bind the IPC socket
 -----------------------------------------------------------------------*/
 static ANSC_STATUS PppMgr_IpcServerInit()
 {
-    ANSC_STATUS ret = ANSC_STATUS_SUCCESS;
-    uint32_t i;
-
     //create and bind the socket if this is server
     if(ANSC_STATUS_FAILURE == PppMgr_createIpcSocket(&ipcListenFd, PPP_MGR_IPC_SERVER))
     {

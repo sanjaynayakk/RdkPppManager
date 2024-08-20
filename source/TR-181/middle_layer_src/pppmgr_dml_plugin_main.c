@@ -86,16 +86,12 @@ int PppManagerDmlInit
     COSASetParamValueBoolProc       pSetParamValueBoolProc      = (COSASetParamValueBoolProc         )NULL;
     COSAGetInstanceNumbersProc      pGetInstanceNumbersProc     = (COSAGetInstanceNumbersProc        )NULL;
 
-    COSAGetCommonHandleProc         pGetCHProc                  = (COSAGetCommonHandleProc           )NULL;
     COSAValidateHierarchyInterfaceProc 
                                     pValInterfaceProc           = (COSAValidateHierarchyInterfaceProc)NULL;
     COSAGetHandleProc               pGetRegistryRootFolder      = (COSAGetHandleProc                 )NULL;
     COSAGetInstanceNumberByIndexProc
                                     pGetInsNumberByIndexProc    = (COSAGetInstanceNumberByIndexProc  )NULL;
-    COSAGetHandleProc               pGetMessageBusHandleProc    = (COSAGetHandleProc                 )NULL;
     COSAGetInterfaceByNameProc      pGetInterfaceByNameProc     = (COSAGetInterfaceByNameProc        )NULL;
-    ULONG                           ret                         = 0;
-    int        rc = -1;
 
     if ( uMaxVersionSupported < THIS_PLUGIN_VERSION )
     {
@@ -146,7 +142,7 @@ int PppManagerDmlInit
         goto EXIT;
     }
 
-    pGetParamValueIntProc = (COSAGetParamValueUlongProc)pPlugInfo->AcquireFunction("COSAGetParamValueInt");
+    pGetParamValueIntProc = (COSAGetParamValueIntProc)pPlugInfo->AcquireFunction("COSAGetParamValueInt");
 
     if( pGetParamValueIntProc != NULL)
     {
@@ -279,7 +275,7 @@ int PppManagerDmlInit
         goto EXIT;
     }
     /* Get Message Bus Handle */
-    g_GetMessageBusHandle = (PFN_CCSPCCDM_APPLY_CHANGES)pPlugInfo->AcquireFunction("COSAGetMessageBusHandle");
+    g_GetMessageBusHandle = (COSAGetHandleProc)pPlugInfo->AcquireFunction("COSAGetMessageBusHandle");
     if ( g_GetMessageBusHandle == NULL )
     {
         goto EXIT;
@@ -297,7 +293,7 @@ int PppManagerDmlInit
     {
         char*   tmpSubsystemPrefix;
         
-        if ( tmpSubsystemPrefix = g_GetSubsystemPrefix(g_pDslhDmlAgent) )
+        if (( tmpSubsystemPrefix = g_GetSubsystemPrefix(g_pDslhDmlAgent)))
         {
             AnscCopyString(g_SubSysPrefix_Irep, tmpSubsystemPrefix);
         }
