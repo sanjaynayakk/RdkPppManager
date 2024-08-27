@@ -231,21 +231,6 @@ static int PppMgr_GetWanIfaceInstance (UINT InstanceNumber, int * WanIfaceInstan
     // for each Wan Interface
     for (iIfaceCount = 1; iIfaceCount <= iTotalNoofEntries; iIfaceCount++)
     {
-#if defined(WAN_MANAGER_UNIFICATION_ENABLED)
-	// get Selection Status
-	snprintf(acTmpQueryParam, sizeof(acTmpQueryParam),WAN_INTERFACE_SELECTION_STATUS, iIfaceCount);
-	if (ANSC_STATUS_FAILURE == DmlPppMgrGetParamValues(WAN_COMPONENT_NAME, WAN_DBUS_PATH, acTmpQueryParam, acTmpReturnValue))
-        {
-            CcspTraceError(("%s %d Failed to get param value %s\n", __FUNCTION__, __LINE__, acTmpQueryParam));
-            return ANSC_STATUS_FAILURE;
-        }
-
-	CcspTraceInfo(("%s %d -  Wan Instance %d is %s\n", __FUNCTION__, __LINE__, iIfaceCount, acTmpReturnValue));
-	if (strcmp(acTmpReturnValue,"Selected") != 0)
-        {
-            continue;
-        }
-#endif
         // get total no of VirtualInterface
         snprintf(acTmpQueryParam, sizeof(acTmpQueryParam), WAN_NO_OF_VIRTUAL_IFACE_PARAM_NAME, iIfaceCount);
         if (ANSC_STATUS_FAILURE == DmlPppMgrGetParamValues(WAN_COMPONENT_NAME, WAN_DBUS_PATH, acTmpQueryParam, acTmpReturnValue))
