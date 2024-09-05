@@ -864,7 +864,7 @@ static ANSC_STATUS PppMgr_ProcessPppState(ipc_msg_payload_t ipcMsg)
         return ANSC_STATUS_FAILURE;
     }
 
-    CcspTraceInfo(("%s %d: PPP State change message from interface %s from pid = %d\n", __FUNCTION__, __LINE__, ipcMsg.data.pppEventMsg.interface, ipcMsg.data.pppEventMsg.pid));
+    CcspTraceInfo(("%s %d: PPP State change message from pid = %d\n", __FUNCTION__, __LINE__, ipcMsg.data.pppEventMsg.pid));
 
     int InstanceNumber = PppMgr_getIfaceDataWithPid(ipcMsg.data.pppEventMsg.pid);
 
