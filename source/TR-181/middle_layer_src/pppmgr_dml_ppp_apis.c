@@ -400,8 +400,8 @@ PppMgr_StartPppClient (UINT InstanceNumber)
                     fscanf(fp,"%s", ppp_mac_addr);
 
                     /* Send PADT for previous ppp session */
-                    ret = snprintf(padt_command, sizeof(padt_command), "pppoe -I %s -e %d:%s -k", VLANInterfaceName, pEntry->Info.SessionID, ppp_mac_addr);
-                    CcspTraceInfo((" PADT command : pppoe -I %s -e %d:%s -k\n",VLANInterfaceName, pEntry->Info.SessionID, ppp_mac_addr));
+                    ret = snprintf(padt_command, sizeof(padt_command), "pppoe -I %s -e %ld:%s -k", VLANInterfaceName, pEntry->Info.SessionID, ppp_mac_addr);
+                    CcspTraceInfo((" PADT command : pppoe -I %s -e %ld:%s -k\n",VLANInterfaceName, pEntry->Info.SessionID, ppp_mac_addr));
 
                     if(ret > 0 && ret <= sizeof(padt_command))
                     {
