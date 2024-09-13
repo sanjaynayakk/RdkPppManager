@@ -176,7 +176,7 @@ bool PppMgr_EnableIf (UINT InstanceNumber, bool Enable)
         CcspTraceInfo(("%s %d: Handling PPP client start for instance %d\n", __FUNCTION__, __LINE__, InstanceNumber));
         if (PppMgr_SendPppdStartEventToQ(InstanceNumber) != ANSC_STATUS_SUCCESS)
         {
-            CcspTraceInfo(("%d %s: posting PPPMGR_EXEC_PPP_CLIENT event to Q failed for instance %d\n", __FUNCTION__, __LINE__, InstanceNumber));
+            CcspTraceInfo(("%s %d: posting PPPMGR_EXEC_PPP_CLIENT event to Q failed for instance %d\n", __FUNCTION__, __LINE__, InstanceNumber));
             return false;
         }
     }
@@ -185,7 +185,7 @@ bool PppMgr_EnableIf (UINT InstanceNumber, bool Enable)
         CcspTraceInfo (("%s %d: disabling PPP client on instance %d\n", __FUNCTION__, __LINE__, InstanceNumber));
         if (PppMgr_StopPppClient(InstanceNumber) != ANSC_STATUS_SUCCESS)
         {
-            CcspTraceInfo(("%d %s: failed to stop ppp client on instace %d\n", __FUNCTION__, __LINE__, InstanceNumber));
+            CcspTraceInfo(("%s %d: failed to stop ppp client on instace %d\n", __FUNCTION__, __LINE__, InstanceNumber));
             return false;
         }
     }
@@ -230,21 +230,6 @@ static int PppMgr_GetWanIfaceInstance (UINT InstanceNumber, int * WanIfaceInstan
     // for each Wan Interface
     for (iIfaceCount = 1; iIfaceCount <= iTotalNoofEntries; iIfaceCount++)
     {
-#if defined(WAN_MANAGER_UNIFICATION_ENABLED)
-	// get Selection Status
-	snprintf(acTmpQueryParam, sizeof(acTmpQueryParam),WAN_INTERFACE_SELECTION_STATUS, iIfaceCount);
-	if (ANSC_STATUS_FAILURE == DmlPppMgrGetParamValues(WAN_COMPONENT_NAME, WAN_DBUS_PATH, acTmpQueryParam, acTmpReturnValue))
-        {
-            CcspTraceError(("%s %d Failed to get param value %s\n", __FUNCTION__, __LINE__, acTmpQueryParam));
-            return ANSC_STATUS_FAILURE;
-        }
-
-	CcspTraceInfo(("%s %d -  Wan Instance %d is %s\n", __FUNCTION__, __LINE__, iIfaceCount, acTmpReturnValue));
-	if (strcmp(acTmpReturnValue,"Selected") != 0)
-        {
-            continue;
-        }
-#endif
         // get total no of VirtualInterface
         snprintf(acTmpQueryParam, sizeof(acTmpQueryParam), WAN_NO_OF_VIRTUAL_IFACE_PARAM_NAME, iIfaceCount);
         if (ANSC_STATUS_FAILURE == DmlPppMgrGetParamValues(WAN_COMPONENT_NAME, WAN_DBUS_PATH, acTmpQueryParam, acTmpReturnValue))
@@ -353,7 +338,7 @@ PppMgr_StartPppClient (UINT InstanceNumber)
                     pEntry->Cfg.Password, auth_proto, pEntry->Cfg.Alias);
 #else
                 /* Assume a default rp-pppoe config exist. Update rp-pppoe configuration */
-                ret =  snprintf(config_command, sizeof(config_command), "pppoe_config.sh %s %s %s %s PPPoA %d %d",
+                ret =  snprintf(config_command, sizeof(config_command), "pppoe_config.sh %s %s %s %s PPPoA %ld %ld",
                         pEntry->Cfg.Username, pEntry->Cfg.Password, pEntry->Info.InterfaceServiceName, pEntry->Info.Name, pEntry->Info.LCPEcho, pEntry->Info.LCPEchoRetry);
                 if(ret > 0 && ret <= sizeof(config_command))
                 {
@@ -387,7 +372,7 @@ PppMgr_StartPppClient (UINT InstanceNumber)
                 }
 
                 /* Assume a defule rp-pppoe config exist. Update rp-pppoe configuration */
-                ret = snprintf(config_command, sizeof(config_command), "pppoe_config.sh '%s' '%s' %s %s PPPoE %d %d %d ",
+                ret = snprintf(config_command, sizeof(config_command), "pppoe_config.sh '%s' '%s' %s %s PPPoE %ld %ld %d ",
                         pEntry->Cfg.Username, pEntry->Cfg.Password, VLANInterfaceName, pEntry->Info.Name, pEntry->Info.LCPEcho , pEntry->Info.LCPEchoRetry,pEntry->Cfg.MaxMRUSize);
                 if(ret > 0 && ret <= sizeof(config_command))
                 {
@@ -479,16 +464,16 @@ ANSC_STATUS PppMgr_StopPppClient (UINT InstanceNumber)
 
 ANSC_STATUS PppDmlIfReset (ULONG InstanceNumber )
 {
-    CcspTraceInfo (("%s %d: disabling PPP client on instance %d\n", __FUNCTION__, __LINE__, InstanceNumber));
+    CcspTraceInfo (("%s %d: disabling PPP client on instance %ld\n", __FUNCTION__, __LINE__, InstanceNumber));
     if (PppMgr_StopPppClient(InstanceNumber) != ANSC_STATUS_SUCCESS)
     {
-        CcspTraceInfo(("%d %s: failed to stop ppp client on instace %d\n", __FUNCTION__, __LINE__, InstanceNumber));
+        CcspTraceInfo(("%s %d: failed to stop ppp client on instance %ld\n", __FUNCTION__, __LINE__, InstanceNumber));
         return false;
     }
-    CcspTraceInfo(("%s %d: Handling PPP client start for instance %d\n", __FUNCTION__, __LINE__, InstanceNumber));
+    CcspTraceInfo(("%s %d: Handling PPP client start for instance %ld\n", __FUNCTION__, __LINE__, InstanceNumber));
     if (PppMgr_SendPppdStartEventToQ(InstanceNumber) != ANSC_STATUS_SUCCESS)
     {
-        CcspTraceInfo(("%d %s: posting PPPMGR_EXEC_PPP_CLIENT event to Q failed for instance %d\n", __FUNCTION__, __LINE__, InstanceNumber));
+        CcspTraceInfo(("%s %d: posting PPPMGR_EXEC_PPP_CLIENT event to Q failed for instance %ld\n", __FUNCTION__, __LINE__, InstanceNumber));
         return false;
     }
     return true;
@@ -538,28 +523,27 @@ int PppMgr_RdkBus_SetParamValuesToDB( char *pParamName, char *pParamVal )
     return retPsmSet;
 }
 
-static int PppManager_SetParamFromPSM(PDML_PPP_IF_FULL pEntry)
+static int PppManager_SetParamFromPSM(PDML_PPP_IF_CFG pEntry)
 {
-    int retPsmSet = CCSP_SUCCESS;
     char param_name[256] = {0};
     char param_value[256] = {0};
-    int instancenum = 0;
+    ULONG instancenum = 0;
 
-    instancenum = pEntry->Cfg.InstanceNumber;
+    instancenum = pEntry->InstanceNumber;
 
-    CcspTraceWarning(("%s-%d:instancenum=%d \n",__FUNCTION__, __LINE__, instancenum));
+    CcspTraceWarning(("%s-%d:instancenum=%ld \n",__FUNCTION__, __LINE__, instancenum));
 
     memset(param_value, 0, sizeof(param_value));
     memset(param_name, 0, sizeof(param_name));
 
-    snprintf(param_value, sizeof(param_name), "%d", pEntry->Cfg.IdleDisconnectTime);
+    snprintf(param_value, sizeof(param_name), "%ld", pEntry->IdleDisconnectTime);
     snprintf(param_name, sizeof(param_name), PSM_PPP_IDLETIME, instancenum);
     PppMgr_RdkBus_SetParamValuesToDB(param_name,param_value);
 
     memset(param_value, 0, sizeof(param_value));
     memset(param_name, 0, sizeof(param_name));
 	
-    snprintf(param_value, sizeof(param_value), "%d", pEntry->Cfg.MaxMRUSize);
+    snprintf(param_value, sizeof(param_value), "%d", pEntry->MaxMRUSize);
     snprintf(param_name, sizeof(param_name), PSM_PPP_MAXMRUSIZE, instancenum);
     PppMgr_RdkBus_SetParamValuesToDB(param_name,param_value);
 
@@ -567,14 +551,14 @@ static int PppManager_SetParamFromPSM(PDML_PPP_IF_FULL pEntry)
     memset(param_value, 0, sizeof(param_value));
     memset(param_name, 0, sizeof(param_name));
 
-    snprintf(param_value, sizeof(param_value), "%s", pEntry->Cfg.Username);
+    snprintf(param_value, sizeof(param_value), "%s", pEntry->Username);
     snprintf(param_name, sizeof(param_name), PSM_PPP_USERNAME, instancenum);
     PppMgr_RdkBus_SetParamValuesToDB(param_name,param_value);
 
     memset(param_value, 0, sizeof(param_value));
     memset(param_name, 0, sizeof(param_name));
 
-    snprintf(param_value, sizeof(param_value), "%s", pEntry->Cfg.Password);
+    snprintf(param_value, sizeof(param_value), "%s", pEntry->Password);
     snprintf(param_name, sizeof(param_name), PSM_PPP_PASSWORD, instancenum);
     PppMgr_RdkBus_SetParamValuesToDB(param_name,param_value);
 #endif
@@ -842,13 +826,12 @@ ANSC_STATUS PppMgr_stopPppoe(void)
     return ANSC_STATUS_SUCCESS;
 }
 
-static ANSC_STATUS DmlPppMgrGetParamValues(char *pComponent, char *pBus, char *pParamName, char *pReturnVal)
+ANSC_STATUS DmlPppMgrGetParamValues(char *pComponent, char *pBus, char *pParamName, char *pReturnVal)
 {
-    CCSP_MESSAGE_BUS_INFO *bus_info = (CCSP_MESSAGE_BUS_INFO *)bus_handle;
-    parameterValStruct_t **retVal;
+    parameterValStruct_t **retVal = NULL;
     char *ParamName[1];
     int ret = 0,
-        nval;
+        nval = 0;
 
     //Assign address for get parameter name
     ParamName[0] = pParamName;
@@ -888,8 +871,8 @@ static ANSC_STATUS DmlPppMgrGetParamValues(char *pComponent, char *pBus, char *p
     return ANSC_STATUS_FAILURE;
 }
 
-ANSC_STATUS DmlWanmanagerSetParamValues(const char *pComponent, const char *pBus,
-        const char *pParamName, const char *pParamVal, enum dataType_e type, unsigned int bCommitFlag)
+ANSC_STATUS DmlWanmanagerSetParamValues(char *pComponent, char *pBus,
+        char *pParamName, char *pParamVal, enum dataType_e type, unsigned int bCommitFlag)
 {
     CCSP_MESSAGE_BUS_INFO *bus_info = (CCSP_MESSAGE_BUS_INFO *)bus_handle;
     parameterValStruct_t param_val[1] = {0};
@@ -906,7 +889,7 @@ ANSC_STATUS DmlWanmanagerSetParamValues(const char *pComponent, const char *pBus
             pBus,
             0,
             0,
-            &param_val,
+            param_val,
             1,
             bCommitFlag,
             &faultParam);
@@ -940,30 +923,6 @@ ULONG GetUptimeinSeconds ()
     return UpTime;
 }
 
-#define PPPOE_PROC_FILE "/proc/net/pppoe"
-static int get_session_id_from_proc_entry(ULONG * p_id)
-{
-    FILE * fp;
-    char buf[1024] = {0};
-    if(fp = fopen(PPPOE_PROC_FILE, "r"))
-    {
-        /* Skip first line of /proc/net/pppoe */
-        /* Id Address Device */
-        fgets(buf, sizeof(buf)-1, fp);
-        while(fgets(buf, sizeof(buf)-1, fp))
-        {
-            unsigned long id = 0L;
-            if(sscanf(buf, "%08X", &id) == 1)
-            {
-                *p_id = ntohs(id);
-                CcspTraceInfo(("PPP Session ID: %08X, %d \n", id, *p_id));
-            }
-        }
-        fclose(fp);
-    }
-    return 0;
-}
-
 static int CosaUtilGetIfStats(char *ifname, PDML_IF_STATS pStats)
 {
     int    i;
@@ -984,12 +943,12 @@ static int CosaUtilGetIfStats(char *ifname, PDML_IF_STATS pStats)
         {
             if(++i <= 2)
                 continue;
-            if(p = strchr(buf, ':'))
+            if((p = strchr(buf, ':')))
             {
                 if(strstr(buf, ifname))
                 {
                     memset(pStats, 0, sizeof(*pStats));
-                    if (sscanf(p+1, "%d %d %d %d %*d %*d %*d %*d %d %d %d %d %*d %*d %*d %*d",
+                    if (sscanf(p+1, "%ld %ld %ld %ld %*d %*d %*d %*d %ld %ld %ld %ld %*d %*d %*d %*d",
                     &pStats->BytesReceived, &pStats->PacketsReceived, &pStats->ErrorsReceived,
                     &pStats->DiscardPacketsReceived,&pStats->BytesSent, &pStats->PacketsSent,
                     &pStats->ErrorsSent, &pStats->DiscardPacketsSent) == 8)

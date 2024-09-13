@@ -33,6 +33,12 @@
  */
 
 #include "pppmgr_global.h"
+#include "execinfo.h"
+#include "ccsp_dm_api.h"
+
+#ifdef INCLUDE_BREAKPAD
+#include "breakpad_wrapper.h"
+#endif
 
 #define DEBUG_INI_NAME  "/etc/debug.ini"
 
@@ -44,7 +50,6 @@ extern ANSC_STATUS PppMgr_Init();
 #if defined(_ANSC_LINUX)
 static void daemonize(void) 
 {
-    int fd;
     switch (fork()) {
         case 0:
             break;
@@ -65,6 +70,7 @@ static void daemonize(void)
     }
 
 #ifndef  _DEBUG
+    int fd;
     fd = open("/dev/null", O_RDONLY);
     if (fd != 0) {
         dup2(fd, 0);
@@ -215,7 +221,6 @@ int main(int argc, char* argv[])
 {
     BOOL                bRunAsDaemon = TRUE;
     int                 idx = 0;
-    int                 ind = -1;
     int                 cmdChar            = 0;
     int                 err;
     char                *subSys = NULL;
@@ -302,7 +307,7 @@ int main(int argc, char* argv[])
 
     if(ANSC_STATUS_FAILURE == PppMgr_Init())
     {
-        fprintf(stderr, "PPP Manager Initiliasation Failed: %s\n", Cdm_StrError(err));
+        fprintf(stderr, "PPP Manager Initialisation Failed: %s\n", Cdm_StrError(err));
 
         bPPPIniatilized = FALSE;
     }

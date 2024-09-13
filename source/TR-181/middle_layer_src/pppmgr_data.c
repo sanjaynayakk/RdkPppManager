@@ -67,7 +67,6 @@ BackEndManagerCreate
         VOID
     )
 {
-    ANSC_STATUS                returnStatus = ANSC_STATUS_SUCCESS;
     PBACKEND_MANAGER_OBJECT    pMyObject    = (PBACKEND_MANAGER_OBJECT)NULL;
 
     /*

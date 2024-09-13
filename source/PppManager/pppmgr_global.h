@@ -35,24 +35,11 @@
 #ifndef  _PPPMGR_GLOBAL_
 #define  _PPPMGR_GLOBAL_
 
-
-#ifdef _ALMIB_EXPORTS
-#define ANSC_EXPORT_API                                __declspec(dllexport)
-#else
-#define ANSC_EXPORT_API                                __declspec(dllimport)
-#endif
-
-
-#ifdef _ANSC_LINUX
-#define ANSC_EXPORT_API
-#endif
-
-
 #include <stdio.h>
 #include <time.h>
 #include "ccsp_trace.h"
 #include "ansc_status.h"
-#include "ansc_debug_wrapper_base.h"
+#include "ansc_platform.h"
 #include "ansc_common_structures.h"
 #include "cosa_plugin_api.h"
 #include "slap_definitions.h"

@@ -42,6 +42,7 @@
 #include <sys/ioctl.h>
 #include <utapi_util.h>
 #include <mqueue.h>
+#include "ccsp_psm_helper.h"
 
 #define MAXINSTANCE    128
 #define DNS_FILE "/var/run/ppp/resolv.conf"
@@ -82,7 +83,6 @@
 #define WAN_NOE_PARAM_NAME    "Device.X_RDK_WanManager.InterfaceNumberOfEntries"
 #define WAN_PHY_PATH_PARAM_NAME    "Device.X_RDK_WanManager.Interface.%d.BaseInterface"
 #define WAN_IFACE_NAME             "Device.X_RDK_WanManager.Interface.%d.VirtualInterface.1.Name"
-#define WAN_INTERFACE_SELECTION_STATUS  "Device.X_RDK_WanManager.Interface.%d.Selection.Status"
 #else
 #define PPP_LCP_STATUS_PARAM_NAME    "Device.X_RDK_WanManager.CPEInterface.%d.PPP.LCPStatus"
 #define PPP_LINK_STATUS_PARAM_NAME    "Device.X_RDK_WanManager.CPEInterface.%d.PPP.LinkStatus"
@@ -140,10 +140,10 @@ ANSC_STATUS PppMgr_stopPppProcess( pid_t pid );
 
 ANSC_STATUS PppMgr_stopPppoe(void);
 
-ANSC_STATUS DmlWanmanagerSetParamValues( const char *pComponent, const char *pBus,
-        const char *pParamName, const char *pParamVal, enum dataType_e type, unsigned int bCommitFlag );
+ANSC_STATUS DmlWanmanagerSetParamValues( char *pComponent, char *pBus,
+        char *pParamName, char *pParamVal, enum dataType_e type, unsigned int bCommitFlag );
 
-static ANSC_STATUS DmlPppMgrGetParamValues(char *pComponent, char *pBus, char *pParamName, char *pReturnVal);
+ANSC_STATUS DmlPppMgrGetParamValues(char *pComponent, char *pBus, char *pParamName, char *pReturnVal);
 
 ULONG GetUptimeinSeconds ();
 
@@ -164,4 +164,20 @@ void PppMgr_GetIfaceData_release (DML_PPP_IF_FULL * pPppTable);
 ANSC_STATUS PppMgr_StopPppClient (UINT InstanceNumber);
 
 int PppMgr_getIfaceDataWithPid (pid_t pid);
+
+ANSC_STATUS PppDmlGetSupportedNCPs (ANSC_HANDLE hContext, PULONG puLong);
+
+int set_syscfg(char *pValue,char *param);
+
+ANSC_STATUS PppDmlGetIfCfg ( ANSC_HANDLE hContext, PDML_PPP_IF_CFG pCfg);
+
+int get_session_id(ULONG * p_id, ANSC_HANDLE hContext);
+
+ANSC_STATUS PppMgr_SendDataToQ (PPPEventQData * pEventData);
+
+pid_t PppMgr_getPppPid(char * ifname);
+
+bool PppMgr_EnableIf (UINT InstanceNumber, bool Enable);
+
+ANSC_STATUS PppMgr_StartPppClient (UINT InstanceNumber);
 #endif

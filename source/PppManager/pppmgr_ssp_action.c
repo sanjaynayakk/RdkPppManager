@@ -47,8 +47,6 @@ extern  ULONG                            g_ulAllocatedSizePeak;
 
 ANSC_STATUS ssp_create()
 {
-    int rc = ANSC_STATUS_FAILURE;
-
     g_pComponentCommonPppManager = (PCOMPONENT_COMMON_PPP_MANAGER) AnscAllocateMemory(sizeof(COMPONENT_COMMON_PPP_MANAGER));
 
     if(!g_pComponentCommonPppManager)
