@@ -530,7 +530,7 @@ static ANSC_STATUS PppMgr_ProcessStateChangedMsg(int InstanceNumber, ipc_ppp_eve
 
                 CcspTraceInfo(("[%s-%d] Updating SessionID to PSM : %ld\n", __FUNCTION__, __LINE__, pEntry->Info.SessionID));
                 get_session_id(&pEntry->Info.SessionID, pEntry);
-                sprintf(paramValue, "%d", pEntry->Info.SessionID);
+                sprintf(paramValue, "%ld", pEntry->Info.SessionID);
                 PppMgr_RdkBus_SetParamValuesToDB(PSM_PPP_SESSIONID, paramValue);
                 break;
 
