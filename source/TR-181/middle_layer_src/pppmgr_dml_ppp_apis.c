@@ -757,6 +757,7 @@ PppDmlGetIntfValuesFromPSM
         CcspTraceError(("%s %d: failed to get %s from PSM\n", __FUNCTION__, __LINE__, param_name));
         }
 
+#ifdef DYNAMIC_CONFIGURE_PPP_LOWERLAYER
     /* Get LowerLayer */
     snprintf(param_name, sizeof(param_name), PSM_PPP_LOWERLAYERS, ulIndex);
     retPsmGet = PSM_Get_Record_Value2(bus_handle, g_Subsystem, param_name, NULL, &param_value);
@@ -769,6 +770,7 @@ PppDmlGetIntfValuesFromPSM
     {
         CcspTraceError(("%s %d: failed to get %s from PSM\n", __FUNCTION__, __LINE__, param_name));
     }
+#endif
 
 #ifdef PPP_USERNAME_PASSWORD_FROM_PSM
     /* Get Username */
