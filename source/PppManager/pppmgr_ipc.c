@@ -99,8 +99,8 @@ static char *pppStateNames[] =
     [PPP_IPV6CP_COMPLETED] = "PPP_IPV6CP_COMPLETED",
     [PPP_IPV6CP_FAILED] = "PPP_IPV6CP_FAILED",
     [PPP_LCP_AUTH_COMPLETED] = "PPP_LCP_AUTH_COMPLETED",
-    [PPP_MAX_STATE] = "PPP_MAX_STATE"
-
+    [PPP_MAX_STATE] = "PPP_MAX_STATE",
+    [PPP_LCP_VENDOR_RECEIVED] = "PPP_LCP_VENDOR_RECEIVED"
 };
 
 /*-------------------Extern declarations--------------------*/
@@ -456,11 +456,11 @@ static ANSC_STATUS PppMgr_DmlSetVendorParams(char *invendormsg , int *SRU , int 
             char *ret;
             if((ret = strstr(cursorCopy + groupArray[g].rm_so, "SRU=")))
             {
-                *SRU = atoi(ret+4);
+                *SRU = strtol(ret+4, NULL, 10);
             }
             else if((ret = strstr(cursorCopy + groupArray[g].rm_so, "SRD=")))
             {
-                *SRD = atoi(ret+4);
+                *SRD = strtol(ret+4, NULL, 10);
             }
         }
         cursor += offset;
@@ -468,6 +468,65 @@ static ANSC_STATUS PppMgr_DmlSetVendorParams(char *invendormsg , int *SRU , int 
     regfree(&regexCompiled);
 
     return ANSC_STATUS_SUCCESS;
+}
+
+/* --------------------------------------------------------------------
+Function : PppMgr_SetLCPParams
+
+Decription: This API will set SRU and SRD  when LCP state change message is received
+-----------------------------------------------------------------------*/
+static ANSC_STATUS PppMgr_SetLCPParams(PDML_PPP_IF_FULL pNewEntry, ipc_ppp_event_msg_t pppEventMsg)
+{
+    int ret = 0;
+    ULONG oldSRUvalue = pNewEntry->Info.SRU;
+    ULONG oldSRDvalue = pNewEntry->Info.SRD;
+
+    pNewEntry->Info.SRU = 0;
+    pNewEntry->Info.SRD = 0;
+    if(strlen(pppEventMsg.event.pppLcpMsg.vendormsg) > 0)
+    {
+        ret = PppMgr_DmlSetVendorParams(pppEventMsg.event.pppLcpMsg.vendormsg,(int *)&pNewEntry->Info.SRU, (int *)&pNewEntry->Info.SRD);
+        if(ret == ANSC_STATUS_FAILURE)
+        {
+            CcspTraceError(("[%s-%d] Setting Vendor Params Falure%s\n", __FUNCTION__, __LINE__,pppEventMsg.event.pppLcpMsg.vendormsg));
+        }
+    }
+
+#if defined(_DT_QoS_Enable_)
+    FILE *fileExist;
+    fileExist = fopen("/usr/sbin/set_qos.sh", "r");
+    if (fileExist)
+    {
+        if (pNewEntry->Info.SRU != NULL)
+        {
+            char buf[56] = {0};
+            snprintf(buf, sizeof(buf), "/usr/sbin/set_qos.sh %d", pNewEntry->Info.SRU);
+            v_secure_system(buf);
+            fclose(fileExist);
+        }
+        else
+        {
+            char buf[56] = {0};
+            snprintf(buf, sizeof(buf), "/usr/sbin/set_qos.sh &");
+            v_secure_system(buf);
+            fclose(fileExist);
+        }
+    }
+    else
+    {
+        CcspTraceInfo(("[%s-%d] script is not present\n", __FUNCTION__, __LINE__));
+    }
+#endif
+    if( oldSRUvalue == pNewEntry->Info.SRU && oldSRDvalue == pNewEntry->Info.SRD )
+    {
+        CcspTraceInfo(("Internet connection was established with the download bandwidth: %d kbit/s and the upload bandwidth: %d kbit/s.\n",
+                            pNewEntry->Info.SRD*1000,pNewEntry->Info.SRU*1000));
+    }
+    else
+    {
+        CcspTraceInfo(("Internet connection has been updated with download bandwidth: %d kbit/s and upload bandwidth: %d kbit/s.\n",
+                            pNewEntry->Info.SRD*1000,pNewEntry->Info.SRU*1000));
+    }
 }
 
 /* --------------------------------------------------------------------
@@ -569,22 +628,12 @@ static ANSC_STATUS PppMgr_ProcessStateChangedMsg(int InstanceNumber, ipc_ppp_eve
 
                 break;
 
+            case PPP_LCP_VENDOR_RECEIVED:
+                PppMgr_SetLCPParams(pEntry, pppEventMsg);
+                break;
+
             case PPP_LCP_AUTH_COMPLETED:
-                pEntry->Info.SRU = 0;
-                pEntry->Info.SRD = 0;
-
-                if(strlen(pppEventMsg.event.pppLcpMsg.vendormsg) > 0)
-                {
-                    ret = PppMgr_DmlSetVendorParams(pppEventMsg.event.pppLcpMsg.vendormsg,
-                            (int *)&pEntry->Info.SRU, (int *)&pEntry->Info.SRD);
-
-                    if(ret == ANSC_STATUS_FAILURE)
-                    {
-                        CcspTraceError(("%s %d: Setting Vendor Params Falure%s\n", __FUNCTION__, __LINE__,
-                                    pppEventMsg.event.pppLcpMsg.vendormsg));
-                    }
-                }
-
+                PppMgr_SetLCPParams(pEntry, pppEventMsg);
                 if(strlen(pppEventMsg.event.pppLcpMsg.authproto) > 0)
                 {
                     CcspTraceInfo(("PPP Authentication Protocol: %s ", pppEventMsg.event.pppLcpMsg.authproto));
@@ -895,6 +944,7 @@ static ANSC_STATUS PppMgr_ProcessPppState(ipc_msg_payload_t ipcMsg)
         case    PPP_INTERFACE_LCP_ECHO_FAILED:
         case    PPP_INTERFACE_AUTH_FAILED:
         case    PPP_LCP_AUTH_COMPLETED:
+        case    PPP_LCP_VENDOR_RECEIVED:
 
             CcspTraceInfo(("[%s-%d] PPP_LCP_STATE_CHANGED message received\n", __FUNCTION__, __LINE__));
 
