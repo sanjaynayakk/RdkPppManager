@@ -138,7 +138,7 @@ int get_session_id(ULONG * p_id, ANSC_HANDLE hContext)
     PDML_PPP_IF_FULL pEntry = (PDML_PPP_IF_FULL)hContext;
 
     if( p_id == NULL){
-       CcspTraceInfo(("%s %d - Invalid Pointer p_id\n", __FUNCTION__, __LINE__));
+       CcspTraceError(("%s %d - Invalid Pointer p_id\n", __FUNCTION__, __LINE__));
        return 0;
     }
 
@@ -249,7 +249,11 @@ int get_auth_proto(int * p_proto)
 
 int safe_strcpy(char * dst, char * src, int dst_size)
 {
-    if (!dst || !src) return -1;
+    if (!dst || !src)
+    {
+        CcspTraceError(("%s - %d : Invalid Source or Destination value\n", __FUNCTION__, __LINE__));
+        return -1;
+    }
 
     memset(dst, 0, dst_size);
     strncpy(dst, src, strlen(src)<=dst_size-1 ? strlen(src):dst_size-1 );
@@ -407,6 +411,7 @@ ANSC_STATUS PppMgr_checkPidExist(pid_t pppPid)
         }
 
     }
+    CcspTraceError(("%s - %d : PID does not Exist\n", __FUNCTION__, __LINE__));
     return ANSC_STATUS_FAILURE;
 }
 
@@ -425,11 +430,13 @@ int find_strstr (char * basestr, int basestr_len, char * substr, int substr_len)
 {
     if ((basestr == NULL) || (substr == NULL))
     {
+        CcspTraceError(("%s - %d : Invalid Input Parameters\n", __FUNCTION__, __LINE__));
         return ANSC_STATUS_FAILURE;
     }
 
     if (basestr_len <= substr_len)
     {
+        CcspTraceError(("%s - %d : Base string length is lesser than or equal to Substring length\n", __FUNCTION__, __LINE__));
         return ANSC_STATUS_FAILURE;
     }
 
@@ -452,6 +459,7 @@ int find_strstr (char * basestr, int basestr_len, char * substr, int substr_len)
             }
         }
     }
+    CcspTraceError(("%s - %d : Failed to find the substring\n", __FUNCTION__, __LINE__));
     return ANSC_STATUS_FAILURE;
 }
 

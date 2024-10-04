@@ -2301,6 +2301,7 @@ IPCP_SetParamStringValue
 
     if(pEntry == NULL)
     {
+        CcspTraceError(("%s -%d : Invalid Memory, Failed to set Parameter Value\n", __FUNCTION__, __LINE__));
         return FALSE;
     }
 

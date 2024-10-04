@@ -193,6 +193,7 @@ static ANSC_STATUS  PppMgr_bindIpcSocket( int32_t sockFd)
     }
     return ANSC_STATUS_SUCCESS;
 #else
+    CcspTraceError(("%s- %d - Failed to bind : nanomsg not supported\n", __FUNCTION__, __LINE__));
     return ANSC_STATUS_FAILURE;
 #endif
 }
@@ -214,6 +215,7 @@ extern ANSC_STATUS PppMgr_createIpcSocket(int32_t *sockFd, uint32_t sockMode)
         return PppMgr_bindIpcSocket(*sockFd);
 
     }
+    CcspTraceError(("%s - %d : Invalid Socket Mode\n", __FUNCTION__, __LINE__));
     return ANSC_STATUS_FAILURE;
 }
 
@@ -229,6 +231,7 @@ static ANSC_STATUS PppMgr_receiveIpcSocket(int32_t sockFd, char *msg, uint32_t *
 {
     if(sockFd < 0 || msg == NULL)
     {
+        CcspTraceError(("%s - %d : IPC Failed - Invalid Socket descriptor or NULL message Buffer \n", __FUNCTION__, __LINE__));
         return ANSC_STATUS_FAILURE;
     }
 
@@ -262,11 +265,13 @@ extern ANSC_STATUS PppMgr_closeIpcSocket(int32_t sockFd)
 #if defined(_USE_NM_MSG_SOCK)
     if(nn_shutdown (sockFd, 0) < 0)
     {
+        CcspTraceError(("%s - %d : IPC Shutdown Failed\n", __FUNCTION__, __LINE__));
         return ANSC_STATUS_FAILURE;
 
     }
     return ANSC_STATUS_SUCCESS;
 #else
+    CcspTraceError(("%s - %d : IPC Shutdown Failed\n", __FUNCTION__, __LINE__));
     return ANSC_STATUS_FAILURE;
 #endif
 }
@@ -362,7 +367,7 @@ static ANSC_STATUS PppMgr_StartIpcServer()
 
     if(PppMgr_IpcServerInit() != ANSC_STATUS_SUCCESS)
     {
-        CcspTraceInfo(("Failed to initialise IPC messaging"));
+        CcspTraceError(("Failed to initialise IPC messaging"));
 
         return ANSC_STATUS_FAILURE;
     }
@@ -371,7 +376,7 @@ static ANSC_STATUS PppMgr_StartIpcServer()
 
     if( 0 != ret )
     {
-        CcspTraceInfo(("%s %d - Failed to start IPC Thread Error:%d\n", __FUNCTION__, __LINE__, ret));
+        CcspTraceError(("%s %d - Failed to start IPC Thread Error:%d\n", __FUNCTION__, __LINE__, ret));
 
         return ANSC_STATUS_FAILURE;
     }
@@ -484,7 +489,7 @@ static ANSC_STATUS PppMgr_ProcessStateChangedMsg(int InstanceNumber, ipc_ppp_eve
 
     if(InstanceNumber <= 0 )
     {
-        CcspTraceInfo(("[%s-%d] - Invalid instance number %d for pid %d\n", __FUNCTION__,
+        CcspTraceError(("[%s-%d] - Invalid instance number %d for pid %d\n", __FUNCTION__,
                     __LINE__, InstanceNumber, pppEventMsg.pid));
 
         return ANSC_STATUS_FAILURE;
@@ -648,6 +653,7 @@ static ANSC_STATUS PppMgr_ProcessStateChangedMsg(int InstanceNumber, ipc_ppp_eve
         PppMgr_GetIfaceData_release(pEntry);
         return ANSC_STATUS_SUCCESS;
     }
+    CcspTraceError(("%s - %d : pEntry is NULL, Failed to get Message from Changed process State\n", __FUNCTION__, __LINE__));
     return ANSC_STATUS_FAILURE;
 }
 
@@ -680,6 +686,7 @@ static ANSC_STATUS PppMgr_ProcessIpcpParams(int InstanceNumber, ipc_ppp_event_ms
     if (pppEventMsg.pppState != PPP_IPCP_COMPLETED)
     {
         PppMgr_SetIPCPStatusDown(InstanceNumber);
+        CcspTraceWarning(("%s - %d : PPP IPCP did not complete\n", __FUNCTION__, __LINE__));
         return ANSC_STATUS_FAILURE;
     }
 
@@ -688,8 +695,7 @@ static ANSC_STATUS PppMgr_ProcessIpcpParams(int InstanceNumber, ipc_ppp_event_ms
                 strcmp(pppEventMsg.event.pppIpcpMsg.gateway, "") == 0 ||
                 strcmp(pppEventMsg.event.pppIpcpMsg.nameserver, "") == 0) )
     {
-        CcspTraceInfo(("[%s-%d] Network parameters are missing from client message\n", __FUNCTION__, __LINE__));
-
+        CcspTraceError(("[%s-%d] Network parameters are missing from client message\n", __FUNCTION__, __LINE__));
         PppMgr_SetIPCPStatusDown(InstanceNumber);
         return ANSC_STATUS_FAILURE;
     }
@@ -713,11 +719,13 @@ static ANSC_STATUS PppMgr_ProcessIpcpParams(int InstanceNumber, ipc_ppp_event_ms
             PppMgr_GetIfaceData_release(pEntry);
             return ANSC_STATUS_FAILURE;
         }
+        CcspTraceInfo(("Internet connection has been established. The gateway IPv4 address assigned by the ISP:  : %u.%u.%u.%u\n",
+                 pEntry->Info.LocalIPAddress.Dot[0],pEntry->Info.LocalIPAddress.Dot[1], pEntry->Info.LocalIPAddress.Dot[2],pEntry->Info.LocalIPAddress.Dot[3]));
 
         ret = PppMgr_DmlSetIp4Param(pppEventMsg.event.pppIpcpMsg.gateway, (char*)&pEntry->Info.RemoteIPAddress);
         if (ret == ANSC_STATUS_FAILURE)
         {
-            CcspTraceError(("[%s-%d] Setting Remote IP Falure%s\n", __FUNCTION__, __LINE__,
+            CcspTraceError(("[%s-%d] Setting Remote IP Failure%s\n", __FUNCTION__, __LINE__,
                         pppEventMsg.event.pppIpcpMsg.gateway));
 
             PppMgr_SetIPCPStatusDown(pEntry->Cfg.InstanceNumber);
@@ -741,7 +749,7 @@ static ANSC_STATUS PppMgr_ProcessIpcpParams(int InstanceNumber, ipc_ppp_event_ms
         }
         if(!dnsCount || dnsCount > 2)
         {
-            CcspTraceInfo((" DNS parsing failed in received message\n"));
+            CcspTraceError((" DNS parsing failed in received message\n"));
 
             PppMgr_SetIPCPStatusDown(pEntry->Cfg.InstanceNumber);
             PppMgr_GetIfaceData_release(pEntry);
@@ -777,7 +785,7 @@ static ANSC_STATUS PppMgr_ProcessIpcpParams(int InstanceNumber, ipc_ppp_event_ms
         PppMgr_GetIfaceData_release(pEntry);
         return ANSC_STATUS_SUCCESS;
     }
-
+    CcspTraceError(("%s - %d : pEntry is NULL, Failed to get PPP IPC Paramters\n", __FUNCTION__, __LINE__));
     return ANSC_STATUS_FAILURE;
 }
 /* --------------------------------------------------------------------
@@ -791,7 +799,7 @@ static ANSC_STATUS PppMgr_ProcessIpv6cpParams(int InstanceNumber, ipc_ppp_event_
 
     if(InstanceNumber <= 0 )
     {
-        CcspTraceInfo(("[%s-%d] - Invalid instance number %d for pid %d\n", __FUNCTION__,
+        CcspTraceError(("[%s-%d] - Invalid instance number %d for pid %d\n", __FUNCTION__,
                     __LINE__, InstanceNumber, pppEventMsg.pid));
 
         return ANSC_STATUS_FAILURE;
@@ -934,7 +942,7 @@ static ANSC_STATUS PppMgr_ProcessPppState(ipc_msg_payload_t ipcMsg)
             break;
         default:
 
-            CcspTraceInfo(("[%s-%d] Unknow message type %d received", __FUNCTION__, __LINE__, ipcMsg.msg_type));
+            CcspTraceError(("[%s-%d] Unknown message type %d received", __FUNCTION__, __LINE__, ipcMsg.msg_type));
 
             retStatus = ANSC_STATUS_FAILURE;
             
@@ -991,6 +999,7 @@ static int PppMgr_ProcessPppEvent(PPPEventQData * pEventData)
         return ANSC_STATUS_SUCCESS;
 
     }
+    CcspTraceError(("Failed to Process PPP Event\n", __FUNCTION__, __LINE__));
     return ANSC_STATUS_FAILURE;
 }
 
@@ -1070,9 +1079,11 @@ Decription: This API will create and bind the IPC socket
 -----------------------------------------------------------------------*/
 static ANSC_STATUS PppMgr_IpcServerInit()
 {
+
     //create and bind the socket if this is server
     if(ANSC_STATUS_FAILURE == PppMgr_createIpcSocket(&ipcListenFd, PPP_MGR_IPC_SERVER))
     {
+        CcspTraceError(("%s - %d : IPC server initialisation failed\n", __FUNCTION__, __LINE__));
         return ANSC_STATUS_FAILURE;
 
     }
@@ -1100,10 +1111,10 @@ ANSC_STATUS PppMgr_Init()
     /* Start IPC server to receive events from ppp client */
     if( PppMgr_StartIpcServer() == ANSC_STATUS_FAILURE )
     {
-        CcspTraceInfo(("%s %d - IPC server start failed!\n", __FUNCTION__, __LINE__ ));
-
+        CcspTraceError(("%s %d - IPC server start failed!\n", __FUNCTION__, __LINE__ ));
         return ANSC_STATUS_FAILURE;
     }
+
     CcspTraceInfo(("%s %d - IPC server started successfully!\n", __FUNCTION__, __LINE__ ));
 
     // Initialise syscfg
@@ -1116,6 +1127,7 @@ ANSC_STATUS PppMgr_Init()
     // Initialize sysevent
     if ( DmlPppSyseventInit( ) < 0 )
     {
+        CcspTraceError(("%s - %d : Failed to initialise sysevent\n", __FUNCTION__, __LINE__));
         return ANSC_STATUS_FAILURE;
     }
 

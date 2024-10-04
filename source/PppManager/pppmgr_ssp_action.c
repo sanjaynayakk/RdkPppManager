@@ -118,7 +118,7 @@ ANSC_STATUS ssp_create()
 
     if (!pDslhCpeController)
     {
-        CcspTraceWarning(("CANNOT Create pDslhCpeController... Exit!\n"));
+        CcspTraceError(("CANNOT Create pDslhCpeController... Exit!\n"));
         return ANSC_STATUS_RESOURCES;
     }
 
